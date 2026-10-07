@@ -1,0 +1,642 @@
+package me.mudkip.moememos.data.service
+
+import android.content.Context
+import android.net.Uri
+import androidx.core.net.toUri
+import androidx.room.withTransaction
+import com.skydoves.sandwich.getOrNull
+import com.skydoves.sandwich.getOrThrow
+import com.skydoves.sandwich.retrofit.adapters.ApiResponseCallAdapterFactory
+import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.serialization.json.Json
+import me.mudkip.moememos.R
+import me.mudkip.moememos.data.api.MemosV0Api
+import me.mudkip.moememos.data.api.MemosV1Api
+import me.mudkip.moememos.data.constant.MemosVersionSupport
+import me.mudkip.moememos.data.constant.MemosVersionSupport.MEMOS_V0_MIN_VERSION
+import me.mudkip.moememos.data.constant.MemosVersionSupport.MEMOS_V1_MAX_VERSION
+import me.mudkip.moememos.data.constant.MemosVersionSupport.MEMOS_V1_MIN_VERSION
+import me.mudkip.moememos.data.local.FileStorage
+import me.mudkip.moememos.data.local.MarkdownFolderStore
+import me.mudkip.moememos.data.local.MoeMemosDatabase
+import me.mudkip.moememos.data.local.entity.ResourceEntity
+import me.mudkip.moememos.data.model.Account
+import me.mudkip.moememos.data.model.LocalAccount
+import me.mudkip.moememos.data.model.User
+import me.mudkip.moememos.data.model.UserData
+import me.mudkip.moememos.data.model.UserSettings
+import me.mudkip.moememos.data.repository.AbstractMemoRepository
+import me.mudkip.moememos.data.repository.FolderMirrorEngine
+import me.mudkip.moememos.data.repository.FolderMirrorRepository
+import me.mudkip.moememos.data.repository.LocalDatabaseRepository
+import me.mudkip.moememos.data.repository.MemosV0Repository
+import me.mudkip.moememos.data.repository.MemosV1Repository
+import me.mudkip.moememos.data.repository.RemoteRepository
+import me.mudkip.moememos.data.repository.SyncingRepository
+import me.mudkip.moememos.ext.settingsDataStore
+import me.mudkip.moememos.ext.string
+import net.swiftzer.semver.SemVer
+import okhttp3.HttpUrl
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import retrofit2.Retrofit
+import retrofit2.converter.kotlinx.serialization.asConverterFactory
+import java.io.File
+import java.time.Instant
+import java.util.UUID
+import javax.inject.Inject
+import javax.inject.Singleton
+
+@Singleton
+class AccountService @Inject constructor(
+    @param:ApplicationContext private val context: Context,
+    private val okHttpClient: OkHttpClient,
+    private val database: MoeMemosDatabase,
+    private val fileStorage: FileStorage,
+    private val secureTokenStorage: SecureTokenStorage,
+) {
+    sealed class LoginCompatibility {
+        data class Supported(val accountCase: UserData.AccountCase) : LoginCompatibility()
+        data class Unsupported(val message: String) : LoginCompatibility()
+        data class RequiresConfirmation(
+            val accountCase: UserData.AccountCase,
+            val version: String,
+            val message: String,
+        ) : LoginCompatibility()
+    }
+
+    sealed class SyncCompatibility {
+        object Allowed : SyncCompatibility()
+        data class Blocked(val message: String?) : SyncCompatibility()
+        data class RequiresConfirmation(val version: String, val message: String) : SyncCompatibility()
+    }
+
+    private data class ServerVersionInfo(
+        val accountCase: UserData.AccountCase,
+        val version: String,
+    )
+
+    private enum class VersionPolicy {
+        SUPPORTED,
+        TOO_LOW,
+        V1_HIGHER,
+    }
+
+    private val networkJson = Json {
+        ignoreUnknownKeys = true
+        coerceInputValues = true
+        explicitNulls = false
+    }
+
+    @Volatile
+    var httpClient: OkHttpClient = okHttpClient
+        private set
+
+    val accounts = context.settingsDataStore.data.map { settings ->
+        settings.usersList.mapNotNull(::parseAccountWithSecureToken)
+    }
+
+    val currentAccount = context.settingsDataStore.data.map { settings ->
+        settings.usersList.firstOrNull { it.accountKey == settings.currentUser }
+            ?.let(::parseAccountWithSecureToken)
+    }
+
+    /**
+     * Markdown 文件夹镜子。只在本地账号下生效，且未绑定文件夹时自动短路（纯透传），
+     * 因此可以无条件包装本地仓库——用户在设置里打开开关后立刻生效，不需要重启。
+     */
+    private val folderMirror = FolderMirrorEngine(
+        database.memoDao(),
+        MarkdownFolderStore(context)
+    )
+
+    @Volatile
+    private var repository: AbstractMemoRepository = FolderMirrorRepository(
+        LocalDatabaseRepository(
+            database.memoDao(),
+            fileStorage,
+            Account.Local(LocalAccount())
+        ),
+        folderMirror
+    )
+
+    @Volatile
+    private var remoteRepository: RemoteRepository? = null
+
+    private val mutex = Mutex()
+    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val initialization = CompletableDeferred<Unit>()
+
+    init {
+        serviceScope.launch {
+            try {
+                mutex.withLock {
+                    updateCurrentAccount(currentAccount.first())
+                }
+                initialization.complete(Unit)
+            } catch (e: Throwable) {
+                initialization.completeExceptionally(e)
+            }
+        }
+    }
+
+    private fun updateCurrentAccount(account: Account?) {
+        repository.close()
+        when (account) {
+            null -> {
+                this.repository = FolderMirrorRepository(
+                    LocalDatabaseRepository(
+                        database.memoDao(),
+                        fileStorage,
+                        Account.Local(LocalAccount())
+                    ),
+                    folderMirror
+                )
+                this.remoteRepository = null
+                httpClient = okHttpClient
+            }
+            is Account.Local -> {
+                this.repository = FolderMirrorRepository(
+                    LocalDatabaseRepository(database.memoDao(), fileStorage, account),
+                    folderMirror
+                )
+                this.remoteRepository = null
+                httpClient = okHttpClient
+            }
+            is Account.MemosV0 -> {
+                val (client, memosApi) = createMemosV0Client(account.info.host, account.info.accessToken)
+                val remote = MemosV0Repository(memosApi, account)
+                this.repository = SyncingRepository(
+                    database.memoDao(),
+                    fileStorage,
+                    remote,
+                    account
+                ) { user ->
+                    updateAccountFromSyncedUser(account.accountKey(), user)
+                }
+                this.remoteRepository = remote
+                this.httpClient = client
+            }
+            is Account.MemosV1 -> {
+                val (client, memosApi) = createMemosV1Client(account.info.host, account.info.accessToken)
+                val remote = MemosV1Repository(memosApi, account)
+                this.repository = SyncingRepository(
+                    database.memoDao(),
+                    fileStorage,
+                    remote,
+                    account
+                ) { user ->
+                    updateAccountFromSyncedUser(account.accountKey(), user)
+                }
+                this.remoteRepository = remote
+                this.httpClient = client
+            }
+        }
+    }
+
+    suspend fun switchAccount(accountKey: String) {
+        awaitInitialization()
+        mutex.withLock {
+            val account = accounts.first().firstOrNull { it.accountKey() == accountKey }
+            context.settingsDataStore.updateData { settings ->
+                settings.copy(currentUser = accountKey)
+            }
+            updateCurrentAccount(account)
+        }
+    }
+
+    suspend fun addAccount(account: Account) {
+        awaitInitialization()
+        mutex.withLock {
+            persistAccessToken(account)
+            context.settingsDataStore.updateData { settings ->
+                val users = settings.usersList.toMutableList()
+                val index = users.indexOfFirst { it.accountKey == account.accountKey() }
+                val currentSettings = users.getOrNull(index)?.settings ?: UserSettings()
+                if (index != -1) {
+                    users.removeAt(index)
+                }
+                users.add(account.toPersistedUserData(currentSettings))
+                settings.copy(
+                    usersList = users,
+                    currentUser = account.accountKey(),
+                )
+            }
+            updateCurrentAccount(account)
+        }
+    }
+
+    suspend fun removeAccount(accountKey: String) {
+        awaitInitialization()
+        mutex.withLock {
+            context.settingsDataStore.updateData { settings ->
+                val users = settings.usersList.toMutableList()
+                val index = users.indexOfFirst { it.accountKey == accountKey }
+                if (index != -1) {
+                    users.removeAt(index)
+                }
+                val newCurrentUser = if (settings.currentUser == accountKey) {
+                    users.firstOrNull()?.accountKey ?: ""
+                } else {
+                    settings.currentUser
+                }
+                settings.copy(
+                    usersList = users,
+                    currentUser = newCurrentUser,
+                )
+            }
+            updateCurrentAccount(currentAccount.first())
+            purgeAccountData(accountKey)
+            secureTokenStorage.removeToken(accountKey)
+        }
+    }
+
+    /**
+     * Copies every local memo (with its attachments) into the server account [targetAccountKey] as
+     * new, unsynced memos; that account's next sync uploads them. The local memos are kept.
+     *
+     * Safe to interrupt and to run again: each copy's identifier is derived from the target account
+     * and the local memo, so memos copied by an earlier (possibly interrupted) run are skipped, even
+     * after they were uploaded. Each memo is written together with its attachments in one
+     * transaction, so a memo is either fully copied or not at all. Returns how many memos were copied.
+     */
+    suspend fun copyLocalMemosToAccount(targetAccountKey: String): Int {
+        val localKey = Account.Local().accountKey()
+        val target = accounts.first().firstOrNull { it.accountKey() == targetAccountKey }
+        require(target != null && target !is Account.Local) { "Not a server account: $targetAccountKey" }
+
+        val memoDao = database.memoDao()
+        val pending = memoDao.getAllMemosForSync(localKey)
+            .filterNot { it.isDeleted }
+            .filter { memoDao.getMemoById(transferredIdentifier(targetAccountKey, it.identifier), targetAccountKey) == null }
+        val resourcesByMemo = pending.associate { memo ->
+            memo.identifier to memoDao.getMemoResources(memo.identifier, localKey)
+        }
+        // Check every attachment first, so a missing file stops the transfer before anything is copied
+        resourcesByMemo.values.flatten().forEach { resource ->
+            if (localFileForResource(resource)?.exists() != true) {
+                throw IllegalStateException("Missing attachment file: ${resource.filename}")
+            }
+        }
+
+        val now = Instant.now()
+        for (memo in pending) {
+            val copyIdentifier = transferredIdentifier(targetAccountKey, memo.identifier)
+            // Files first, at paths derived from the copy, so a retry after an interruption overwrites
+            // them instead of leaving a second set behind
+            val copiedResources = resourcesByMemo.getValue(memo.identifier).map { resource ->
+                val copyResourceIdentifier = transferredIdentifier(targetAccountKey, resource.identifier)
+                val uri = localFileForResource(resource)!!.inputStream().use { input ->
+                    fileStorage.saveFile(targetAccountKey, input, copyResourceIdentifier + "_" + resource.filename)
+                }
+                resource.copy(
+                    identifier = copyResourceIdentifier,
+                    remoteId = null,
+                    accountKey = targetAccountKey,
+                    uri = uri.toString(),
+                    localUri = uri.toString(),
+                    memoId = copyIdentifier
+                )
+            }
+            database.withTransaction {
+                memoDao.insertMemo(
+                    memo.copy(
+                        identifier = copyIdentifier,
+                        remoteId = null,
+                        accountKey = targetAccountKey,
+                        needsSync = true,
+                        isDeleted = false,
+                        lastModified = now,
+                        lastSyncedAt = null
+                    )
+                )
+                copiedResources.forEach { memoDao.insertResource(it) }
+            }
+        }
+        return pending.size
+    }
+
+    private fun transferredIdentifier(targetAccountKey: String, localIdentifier: String): String =
+        UUID.nameUUIDFromBytes("transfer:$targetAccountKey:$localIdentifier".toByteArray()).toString()
+
+    private fun localFileForResource(resource: ResourceEntity): File? {
+        val uri = (resource.localUri ?: resource.uri).toUri()
+        if (uri.scheme != "file") {
+            return null
+        }
+        val path = uri.path ?: return null
+        return File(path)
+    }
+
+    private suspend fun purgeAccountData(accountKey: String) {
+        val memoDao = database.memoDao()
+        memoDao.deleteResourcesByAccount(accountKey)
+        memoDao.deleteMemosByAccount(accountKey)
+        fileStorage.deleteAccountFiles(accountKey)
+    }
+
+    private suspend fun updateAccountFromSyncedUser(accountKey: String, user: User) {
+        mutex.withLock {
+            context.settingsDataStore.updateData { settings ->
+                val index = settings.usersList.indexOfFirst { it.accountKey == accountKey }
+                if (index == -1) {
+                    return@updateData settings
+                }
+                val existingUser = settings.usersList[index]
+                val current = parseAccountWithSecureToken(existingUser) ?: return@updateData settings
+                val updated = current.withUser(user)
+                val users = settings.usersList.toMutableList()
+                users[index] = updated.toPersistedUserData(existingUser.settings)
+                settings.copy(usersList = users)
+            }
+        }
+    }
+
+    fun createMemosV0Client(host: String, accessToken: String?): Pair<OkHttpClient, MemosV0Api> {
+        var client = okHttpClient
+
+        if (!accessToken.isNullOrEmpty()) {
+            client = client.newBuilder().addNetworkInterceptor { chain ->
+                var request = chain.request()
+                if (shouldAttachAccessToken(request.url, host)) {
+                    request = request.newBuilder().addHeader("Authorization", "Bearer $accessToken")
+                        .build()
+                }
+                chain.proceed(request)
+            }.build()
+        }
+
+        return client to Retrofit.Builder()
+            .baseUrl(host)
+            .client(client)
+            .addConverterFactory(networkJson.asConverterFactory("application/json".toMediaType()))
+            .addCallAdapterFactory(ApiResponseCallAdapterFactory.create())
+            .build()
+            .create(MemosV0Api::class.java)
+    }
+
+    fun createMemosV1Client(host: String, accessToken: String?): Pair<OkHttpClient, MemosV1Api> {
+        val client = okHttpClient.newBuilder().apply {
+            if (!accessToken.isNullOrBlank()) {
+                addNetworkInterceptor { chain ->
+                    var request = chain.request()
+                    if (shouldAttachAccessToken(request.url, host)) {
+                        request = request.newBuilder()
+                            .addHeader("Authorization", "Bearer $accessToken")
+                            .build()
+                    }
+                    chain.proceed(request)
+                }
+            }
+        }.build()
+
+        return client to Retrofit.Builder()
+            .baseUrl(host)
+            .client(client)
+            .addConverterFactory(networkJson.asConverterFactory("application/json".toMediaType()))
+            .addCallAdapterFactory(ApiResponseCallAdapterFactory.create())
+            .build()
+            .create(MemosV1Api::class.java)
+    }
+
+    suspend fun checkLoginCompatibility(host: String, allowHigherV1Version: Boolean = false): LoginCompatibility {
+        val serverVersion = detectAccountCaseAndVersion(host)
+        return when (evaluateVersionPolicy(serverVersion)) {
+            VersionPolicy.SUPPORTED -> LoginCompatibility.Supported(serverVersion.accountCase)
+            VersionPolicy.TOO_LOW -> LoginCompatibility.Unsupported(MemosVersionSupport.supportedVersionsMessage(context))
+            VersionPolicy.V1_HIGHER -> {
+                if (allowHigherV1Version) {
+                    LoginCompatibility.Supported(serverVersion.accountCase)
+                } else {
+                    LoginCompatibility.RequiresConfirmation(
+                        accountCase = serverVersion.accountCase,
+                        version = serverVersion.version,
+                        message = R.string.memos_login_version_higher_warning.string,
+                    )
+                }
+            }
+        }
+    }
+
+    suspend fun checkCurrentAccountSyncCompatibility(
+        isAutomatic: Boolean,
+        allowHigherV1Version: String? = null,
+    ): SyncCompatibility {
+        awaitInitialization()
+        val account = currentAccount.first() ?: return SyncCompatibility.Allowed
+        if (account !is Account.MemosV0 && account !is Account.MemosV1) {
+            return SyncCompatibility.Allowed
+        }
+
+        val serverVersion = fetchVersionForAccount(account)
+            ?: return if (isAutomatic) {
+                SyncCompatibility.Blocked(null)
+            } else {
+                SyncCompatibility.Blocked(MemosVersionSupport.supportedVersionsMessage(context))
+            }
+        return when (evaluateVersionPolicy(serverVersion)) {
+            VersionPolicy.SUPPORTED -> SyncCompatibility.Allowed
+            VersionPolicy.TOO_LOW -> {
+                if (isAutomatic) {
+                    SyncCompatibility.Blocked(null)
+                } else {
+                    SyncCompatibility.Blocked(MemosVersionSupport.supportedVersionsMessage(context))
+                }
+            }
+            VersionPolicy.V1_HIGHER -> {
+                val accepted = isUnsupportedSyncVersionAccepted(account.accountKey(), serverVersion.version)
+                if (isAutomatic) {
+                    return if (accepted) {
+                        SyncCompatibility.Allowed
+                    } else {
+                        SyncCompatibility.Blocked(null)
+                    }
+                }
+                if (allowHigherV1Version == serverVersion.version) {
+                    return SyncCompatibility.Allowed
+                }
+                if (accepted) {
+                    return SyncCompatibility.Allowed
+                }
+                SyncCompatibility.RequiresConfirmation(
+                    version = serverVersion.version,
+                    message = R.string.memos_sync_version_higher_warning.string,
+                )
+            }
+        }
+    }
+
+    suspend fun rememberAcceptedUnsupportedSyncVersion(version: String) {
+        awaitInitialization()
+        val accountKey = currentAccount.first()?.accountKey() ?: return
+        mutex.withLock {
+            context.settingsDataStore.updateData { settings ->
+                val users = settings.usersList.toMutableList()
+                val index = users.indexOfFirst { it.accountKey == accountKey }
+                if (index == -1) {
+                    return@updateData settings
+                }
+                val user = users[index]
+                val versions = (user.settings.acceptedUnsupportedSyncVersions + version).distinct()
+                users[index] = user.copy(
+                    settings = user.settings.copy(acceptedUnsupportedSyncVersions = versions)
+                )
+                settings.copy(usersList = users)
+            }
+        }
+    }
+
+    suspend fun detectAccountCase(host: String): UserData.AccountCase {
+        return detectAccountCaseAndVersion(host).accountCase
+    }
+
+    suspend fun getRepository(): AbstractMemoRepository {
+        awaitInitialization()
+        mutex.withLock {
+            return repository
+        }
+    }
+
+    suspend fun getRemoteRepository(): RemoteRepository? {
+        awaitInitialization()
+        mutex.withLock {
+            return remoteRepository
+        }
+    }
+
+    private suspend fun detectAccountCaseAndVersion(host: String): ServerVersionInfo {
+        val memosV0Status = createMemosV0Client(host, null).second.status().getOrNull()
+        val memosV0Version = memosV0Status?.profile?.version?.trim().orEmpty()
+        if (memosV0Version.isNotEmpty()) {
+            return ServerVersionInfo(UserData.AccountCase.MEMOS_V0, memosV0Version)
+        }
+
+        val memosV1Profile = createMemosV1Client(host, null).second.getProfile().getOrThrow()
+        val memosV1Version = memosV1Profile.version.trim()
+        if (memosV1Version.isNotEmpty()) {
+            return ServerVersionInfo(UserData.AccountCase.MEMOS_V1, memosV1Version)
+        }
+
+        return ServerVersionInfo(UserData.AccountCase.ACCOUNT_NOT_SET, "")
+    }
+
+    private suspend fun fetchVersionForAccount(account: Account): ServerVersionInfo? {
+        return when (account) {
+            is Account.MemosV0 -> {
+                val version = createMemosV0Client(account.info.host, account.info.accessToken)
+                    .second
+                    .status()
+                    .getOrNull()
+                    ?.profile
+                    ?.version
+                    ?.trim()
+                    .orEmpty()
+                if (version.isBlank()) null else ServerVersionInfo(UserData.AccountCase.MEMOS_V0, version)
+            }
+            is Account.MemosV1 -> {
+                val version = createMemosV1Client(account.info.host, account.info.accessToken)
+                    .second
+                    .getProfile()
+                    .getOrNull()
+                    ?.version
+                    ?.trim()
+                    .orEmpty()
+                if (version.isBlank()) null else ServerVersionInfo(UserData.AccountCase.MEMOS_V1, version)
+            }
+            else -> null
+        }
+    }
+
+    private suspend fun isUnsupportedSyncVersionAccepted(accountKey: String, version: String): Boolean {
+        val userData = context.settingsDataStore.data.first()
+            .usersList
+            .firstOrNull { it.accountKey == accountKey }
+            ?: return false
+        return userData.settings.acceptedUnsupportedSyncVersions.contains(version)
+    }
+
+    private fun parseAccountWithSecureToken(userData: UserData): Account? {
+        val account = Account.parseUserData(userData) ?: return null
+        val token = secureTokenStorage.getToken(userData.accountKey)
+            .orEmpty()
+        return when (account) {
+            is Account.MemosV0 -> Account.MemosV0(account.info.copy(accessToken = token))
+            is Account.MemosV1 -> Account.MemosV1(account.info.copy(accessToken = token))
+            is Account.Local -> account
+        }
+    }
+
+    private fun Account.toPersistedUserData(settings: UserSettings): UserData {
+        return when (this) {
+            is Account.MemosV0 -> UserData(
+                settings = settings,
+                accountKey = accountKey(),
+                memosV0 = info.copy(accessToken = "")
+            )
+            is Account.MemosV1 -> UserData(
+                settings = settings,
+                accountKey = accountKey(),
+                memosV1 = info.copy(accessToken = "")
+            )
+            is Account.Local -> UserData(
+                settings = settings,
+                accountKey = accountKey(),
+                local = info
+            )
+        }
+    }
+
+    private fun persistAccessToken(account: Account) {
+        when (account) {
+            is Account.MemosV0 -> secureTokenStorage.saveToken(account.accountKey(), account.info.accessToken)
+            is Account.MemosV1 -> secureTokenStorage.saveToken(account.accountKey(), account.info.accessToken)
+            is Account.Local -> Unit
+        }
+    }
+
+    private fun shouldAttachAccessToken(requestUrl: HttpUrl, host: String): Boolean {
+        val baseUrl = host.toHttpUrlOrNull() ?: return false
+        return requestUrl.scheme == baseUrl.scheme &&
+            requestUrl.host == baseUrl.host &&
+            requestUrl.port == baseUrl.port
+    }
+
+    private suspend fun awaitInitialization() {
+        initialization.await()
+    }
+
+    private fun evaluateVersionPolicy(serverVersion: ServerVersionInfo): VersionPolicy {
+        val versionName = serverVersion.version.trim()
+        val version = SemVer.parseOrNull(versionName)
+        return when (serverVersion.accountCase) {
+            UserData.AccountCase.MEMOS_V0 -> {
+                when {
+                    versionName.isEmpty() -> VersionPolicy.TOO_LOW
+                    version == null -> VersionPolicy.SUPPORTED
+                    version < MEMOS_V0_MIN_VERSION -> VersionPolicy.TOO_LOW
+                    else -> VersionPolicy.SUPPORTED
+                }
+            }
+            UserData.AccountCase.MEMOS_V1 -> {
+                when {
+                    versionName.isEmpty() -> VersionPolicy.TOO_LOW
+                    version == null -> VersionPolicy.V1_HIGHER
+                    version < MEMOS_V1_MIN_VERSION -> VersionPolicy.TOO_LOW
+                    version > MEMOS_V1_MAX_VERSION -> VersionPolicy.V1_HIGHER
+                    else -> VersionPolicy.SUPPORTED
+                }
+            }
+            else -> VersionPolicy.TOO_LOW
+        }
+    }
+}

@@ -1,0 +1,13 @@
+<b>Moe Memos</b> is an app to help you capture thoughts and ideas. You can use Moe Memos with either a self-hosted Memos server or locally on your device.
+
+Features:
+
+- Write memos like tweeting to yourself
+- Use Moe Memos locally on your device (with export) or sync with your own Memos server
+- Offline-first experience with automatic sync when you are back online
+- Material You design with dynamic themes and themed icon
+- Rich memo content: Markdown editor and renderer, images, non-image attachments, and to-do items
+- Organize and find memos with tags, pinning, and search
+- Home screen widget and share sheet integration (text, images, and webpages)
+- View your memo activity with a progress graph
+- Full privacy protection, no data collection

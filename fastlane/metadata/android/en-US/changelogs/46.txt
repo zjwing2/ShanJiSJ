@@ -1,0 +1,12 @@
+## What's Changed
+
+- Added support for local accounts for users without a Memos server. Local account data can also be exported.
+- Enabled two-way syncing with the Memos server. The app is now fully functional offline and automatically pushes data when back online (initial work done by @jkuhlemann).
+- Added Markdown formatting tools to the memo editor (by @maksdizzy).
+- Added a dedicated memo detail page.
+- Added support for uploading and downloading non-image attachments.
+- Extended Markdown support.
+- Added a widget to random display a memo.
+- Moe Memos will now show warning for unsupported Memos version when logging in or syncing.
+
+**Full Changelog**: https://github.com/mudkipme/MoeMemosAndroid/compare/0.8.8...2.0.1

@@ -1,0 +1,62 @@
+package me.mudkip.moememos
+
+import android.content.Intent
+import android.graphics.Color
+import android.os.Bundle
+import androidx.activity.SystemBarStyle
+import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
+import androidx.activity.viewModels
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.fragment.app.FragmentActivity
+import dagger.hilt.android.AndroidEntryPoint
+import me.mudkip.moememos.ui.page.common.Navigation
+import me.mudkip.moememos.ui.security.AppLockGate
+import me.mudkip.moememos.viewmodel.LocalMemos
+import me.mudkip.moememos.viewmodel.LocalUserState
+import me.mudkip.moememos.viewmodel.MemosViewModel
+import me.mudkip.moememos.viewmodel.UserStateViewModel
+
+@AndroidEntryPoint
+class MainActivity : FragmentActivity() {
+    private val userStateViewModel: UserStateViewModel by viewModels()
+    private val memosViewModel: MemosViewModel by viewModels()
+
+    var pendingIntent: Intent? by mutableStateOf(null)
+
+    companion object {
+        const val ACTION_NEW_MEMO = "me.mudkip.moememos.action.NEW_MEMO"
+        const val ACTION_EDIT_MEMO = "me.mudkip.moememos.action.EDIT_MEMO"
+        const val ACTION_VIEW_MEMO = "me.mudkip.moememos.action.VIEW_MEMO"
+        const val EXTRA_MEMO_ID = "memoId"
+    }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        enableEdgeToEdge(
+            statusBarStyle = SystemBarStyle.auto(Color.TRANSPARENT, Color.TRANSPARENT),
+            navigationBarStyle = SystemBarStyle.auto(Color.TRANSPARENT, Color.TRANSPARENT)
+        )
+        if (savedInstanceState == null) {
+            pendingIntent = intent
+        }
+        setContent {
+            CompositionLocalProvider(
+                LocalUserState provides userStateViewModel,
+                LocalMemos provides memosViewModel
+            ) {
+                AppLockGate {
+                    Navigation()
+                }
+            }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        pendingIntent = intent
+    }
+}
