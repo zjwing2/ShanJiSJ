@@ -119,4 +119,25 @@ class MarkdownTest {
 
         assertEquals(setOf("realTag"), tags)
     }
+
+    @Test
+    fun extractCustomTags_ignoresPureNumberTagsFromWebArticles() {
+        // 网页正文里成片的编号（第 138 期、第 2024 年）不是标签
+        val markdown = """
+            周刊第 #138 期（2020 #138）
+            本杂志 #2024 年度合集
+            #真正的标签
+        """.trimIndent()
+
+        val tags = extractCustomTags(markdown)
+
+        assertEquals(setOf("真正的标签"), tags)
+    }
+
+    @Test
+    fun extractCustomTags_stripsTrailingPunctuationFromTagName() {
+        val tags = extractCustomTags("聊点 #想法， 然后 #todo。")
+
+        assertEquals(setOf("想法", "todo"), tags)
+    }
 }

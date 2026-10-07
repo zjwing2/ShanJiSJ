@@ -105,3 +105,8 @@ lint/tmp/
 
 # Serena (Claude Code MCP server)
 .serena/
+
+# 第三方语音库由 app/libs/dl.py 下载，不入库（48MB）
+app/libs/*.aar
+app/libs/*.jar
+app/libs/dlparts/

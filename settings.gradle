@@ -1,5 +1,8 @@
 pluginManagement {
     repositories {
+        // 国内镜像优先；若某构件镜像缺失，Gradle 会自动回退到后面的官方源
+        maven { url = uri('https://maven.aliyun.com/repository/gradle-plugin') }
+        maven { url = uri('https://maven.aliyun.com/repository/google') }
         gradlePluginPortal()
         google()
         mavenCentral()
@@ -11,6 +14,8 @@ plugins {
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories {
+        maven { url = uri('https://maven.aliyun.com/repository/google') }
+        maven { url = uri('https://maven.aliyun.com/repository/public') }
         google()
         mavenCentral()
         maven { url = uri('https://jitpack.io') }

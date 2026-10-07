@@ -26,6 +26,7 @@ import me.mudkip.moememos.data.constant.MemosVersionSupport.MEMOS_V0_MIN_VERSION
 import me.mudkip.moememos.data.constant.MemosVersionSupport.MEMOS_V1_MAX_VERSION
 import me.mudkip.moememos.data.constant.MemosVersionSupport.MEMOS_V1_MIN_VERSION
 import me.mudkip.moememos.data.local.FileStorage
+import me.mudkip.moememos.data.local.MarkdownFolderStore
 import me.mudkip.moememos.data.local.MoeMemosDatabase
 import me.mudkip.moememos.data.local.entity.ResourceEntity
 import me.mudkip.moememos.data.model.Account
@@ -34,6 +35,8 @@ import me.mudkip.moememos.data.model.User
 import me.mudkip.moememos.data.model.UserData
 import me.mudkip.moememos.data.model.UserSettings
 import me.mudkip.moememos.data.repository.AbstractMemoRepository
+import me.mudkip.moememos.data.repository.FolderMirrorEngine
+import me.mudkip.moememos.data.repository.FolderMirrorRepository
 import me.mudkip.moememos.data.repository.LocalDatabaseRepository
 import me.mudkip.moememos.data.repository.MemosV0Repository
 import me.mudkip.moememos.data.repository.MemosV1Repository
@@ -108,11 +111,23 @@ class AccountService @Inject constructor(
             ?.let(::parseAccountWithSecureToken)
     }
 
-    @Volatile
-    private var repository: AbstractMemoRepository = LocalDatabaseRepository(
+    /**
+     * Markdown 文件夹镜子。只在本地账号下生效，且未绑定文件夹时自动短路（纯透传），
+     * 因此可以无条件包装本地仓库——用户在设置里打开开关后立刻生效，不需要重启。
+     */
+    private val folderMirror = FolderMirrorEngine(
         database.memoDao(),
-        fileStorage,
-        Account.Local(LocalAccount())
+        MarkdownFolderStore(context)
+    )
+
+    @Volatile
+    private var repository: AbstractMemoRepository = FolderMirrorRepository(
+        LocalDatabaseRepository(
+            database.memoDao(),
+            fileStorage,
+            Account.Local(LocalAccount())
+        ),
+        folderMirror
     )
 
     @Volatile
@@ -139,12 +154,22 @@ class AccountService @Inject constructor(
         repository.close()
         when (account) {
             null -> {
-                this.repository = LocalDatabaseRepository(database.memoDao(), fileStorage, Account.Local(LocalAccount()))
+                this.repository = FolderMirrorRepository(
+                    LocalDatabaseRepository(
+                        database.memoDao(),
+                        fileStorage,
+                        Account.Local(LocalAccount())
+                    ),
+                    folderMirror
+                )
                 this.remoteRepository = null
                 httpClient = okHttpClient
             }
             is Account.Local -> {
-                this.repository = LocalDatabaseRepository(database.memoDao(), fileStorage, account)
+                this.repository = FolderMirrorRepository(
+                    LocalDatabaseRepository(database.memoDao(), fileStorage, account),
+                    folderMirror
+                )
                 this.remoteRepository = null
                 httpClient = okHttpClient
             }

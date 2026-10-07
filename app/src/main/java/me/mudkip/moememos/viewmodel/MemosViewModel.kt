@@ -5,6 +5,7 @@ import android.net.Uri
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
@@ -30,11 +31,15 @@ import me.mudkip.moememos.data.constant.MemosVersionSupport
 import me.mudkip.moememos.data.constant.MoeMemosException
 import me.mudkip.moememos.data.local.entity.MemoEntity
 import me.mudkip.moememos.data.local.entity.ResourceEntity
+import me.mudkip.moememos.data.local.localFileOf
 import me.mudkip.moememos.data.model.DailyUsageStat
 import me.mudkip.moememos.data.model.MemoVisibility
 import me.mudkip.moememos.data.model.SyncStatus
 import me.mudkip.moememos.data.service.AccountService
 import me.mudkip.moememos.data.service.MemoService
+import me.mudkip.moememos.data.transcription.TranscriptionAvailability
+import me.mudkip.moememos.data.transcription.TranscriptionManager
+import me.mudkip.moememos.data.transcription.TranscriptionResult
 import me.mudkip.moememos.ext.getErrorMessage
 import me.mudkip.moememos.ext.string
 import me.mudkip.moememos.widget.WidgetUpdater
@@ -46,6 +51,7 @@ import javax.inject.Inject
 class MemosViewModel @Inject constructor(
     private val memoService: MemoService,
     private val accountService: AccountService,
+    private val transcriptionManager: TranscriptionManager,
     @param:ApplicationContext private val appContext: Context
 ) : ViewModel() {
 
@@ -218,6 +224,65 @@ class MemosViewModel @Inject constructor(
         memoService.getRepository().cacheResourceFile(resourceIdentifier, downloadedUri)
     }
 
+    // ------------------------------------------------------------------ 老音频补转
+
+    /**
+     * 每个音频附件的补转状态，按资源 identifier 索引。
+     * 详情页的音频芯片直接读这张表渲染「转写 / 转写中 / 完成 / 重试」。
+     */
+    val audioTranscribeStates = mutableStateMapOf<String, AudioTranscribeState>()
+
+    /**
+     * 转写一个已经存在的音频附件，把文字按 `[语音 HH:mm]` 格式追加到所属笔记正文。
+     *
+     * 这条入口是给「以前录的老音频」用的：录音当下没开转写、或当时转写失败的，
+     * 在详情页点一下就能补。引擎关着、模型没下、音频不在本机时都以
+     * [AudioTranscribeState.Failed] 落地，原因直接展示。
+     */
+    fun transcribeAudioAttachment(memoIdentifier: String, resource: ResourceEntity) {
+        // 同一个音频不并发转；完成或失败后允许再次点击（重试）
+        if (audioTranscribeStates[resource.identifier] is AudioTranscribeState.Running) return
+
+        viewModelScope.launch {
+            fun fail(message: String) {
+                audioTranscribeStates[resource.identifier] = AudioTranscribeState.Failed(message)
+            }
+
+            if (!transcriptionManager.isEnabled()) {
+                fail(appContext.getString(me.mudkip.moememos.R.string.transcription_disabled))
+                return@launch
+            }
+            val availability = transcriptionManager.availability()
+            if (availability is TranscriptionAvailability.Unavailable) {
+                fail(availability.reason)
+                return@launch
+            }
+            val file = localFileOf(resource)
+            if (file == null) {
+                fail(appContext.getString(me.mudkip.moememos.R.string.transcription_audio_missing))
+                return@launch
+            }
+
+            audioTranscribeStates[resource.identifier] = AudioTranscribeState.Running
+            when (val result = transcriptionManager.transcribe(file)) {
+                is TranscriptionResult.Failure -> fail(result.message)
+                is TranscriptionResult.Success -> {
+                    val memo = memos.firstOrNull { it.identifier == memoIdentifier }
+                    if (memo == null) {
+                        fail(appContext.getString(me.mudkip.moememos.R.string.memo_not_found))
+                        return@launch
+                    }
+                    val block = transcriptionManager.appendBlock(resource.filename, result.text)
+                    when (val response = editMemo(memoIdentifier, memo.content + block, memo.resources, memo.visibility)) {
+                        is ApiResponse.Success ->
+                            audioTranscribeStates[resource.identifier] = AudioTranscribeState.Done
+                        else -> fail(response.getErrorMessage())
+                    }
+                }
+            }
+        }
+    }
+
     suspend fun getResourceById(resourceIdentifier: String): ResourceEntity? = withContext(viewModelScope.coroutineContext) {
         when (val response = memoService.getRepository().listResources()) {
             is ApiResponse.Success -> response.data.firstOrNull { it.identifier == resourceIdentifier }
@@ -248,6 +313,18 @@ class MemosViewModel @Inject constructor(
 
 val LocalMemos =
     compositionLocalOf<MemosViewModel> { error(me.mudkip.moememos.R.string.memos_view_model_not_found.string) }
+
+/** 详情页音频附件的补转状态。 */
+sealed interface AudioTranscribeState {
+    /** 正在转写。 */
+    data object Running : AudioTranscribeState
+
+    /** 转写完成，文字已追加进正文。 */
+    data object Done : AudioTranscribeState
+
+    /** 失败（含引擎未开启、模型未下载、文件不在本机），[message] 可直接展示。 */
+    data class Failed(val message: String) : AudioTranscribeState
+}
 
 sealed class ManualSyncResult {
     object Completed : ManualSyncResult()

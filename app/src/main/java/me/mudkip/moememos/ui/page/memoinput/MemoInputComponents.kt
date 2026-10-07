@@ -30,6 +30,8 @@ import androidx.compose.material.icons.outlined.FormatItalic
 import androidx.compose.material.icons.outlined.FormatListNumbered
 import androidx.compose.material.icons.outlined.FormatStrikethrough
 import androidx.compose.material.icons.outlined.Image
+import androidx.compose.material.icons.outlined.Link
+import androidx.compose.material.icons.outlined.Mic
 import androidx.compose.material.icons.outlined.PhotoCamera
 import androidx.compose.material.icons.outlined.Tag
 import androidx.compose.material3.AlertDialog
@@ -143,6 +145,8 @@ internal fun MemoInputBottomBar(
     onPickImage: () -> Unit,
     onPickAttachment: () -> Unit,
     onTakePhoto: () -> Unit,
+    onRecordAudio: () -> Unit,
+    onFetchLink: () -> Unit,
     onFormat: (MarkdownFormat) -> Unit,
 ) {
     val scrollState = rememberScrollState()
@@ -239,6 +243,14 @@ internal fun MemoInputBottomBar(
 
                 ActionIconButton(label = stringResource(R.string.take_photo), onClick = onTakePhoto) {
                     Icon(Icons.Outlined.PhotoCamera, contentDescription = stringResource(R.string.take_photo))
+                }
+
+                ActionIconButton(label = stringResource(R.string.record_audio), onClick = onRecordAudio) {
+                    Icon(Icons.Outlined.Mic, contentDescription = stringResource(R.string.record_audio))
+                }
+
+                ActionIconButton(label = stringResource(R.string.web_link_fetch), onClick = onFetchLink) {
+                    Icon(Icons.Outlined.Link, contentDescription = stringResource(R.string.web_link_fetch))
                 }
 
                 Spacer(modifier = Modifier.size(4.dp))

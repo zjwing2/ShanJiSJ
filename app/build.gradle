@@ -20,7 +20,8 @@ def hasReleaseSigning = [
 android {
     compileSdk = 37
     // Provides llvm-strip for native libraries bundled by AndroidX.
-    ndkVersion = '28.2.13676358'
+    // 本地构建使用已安装的 NDK（本项目没有原生源码，NDK 只用于 strip 预编译 .so）。
+    ndkVersion = System.getenv("MOEMEMOS_NDK_VERSION") ?: '27.0.12077973'
 
     dependenciesInfo {
         // Disables dependency metadata when building APKs.
@@ -33,12 +34,19 @@ android {
         applicationId = "me.mudkip.moememos"
         minSdk = 26
         targetSdk = 37
-        versionCode = 50
-        versionName = "2.0.5"
+        versionCode = 64
+        versionName = "2.0.20"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
             useSupportLibrary = true
+        }
+
+        ndk {
+            // 端侧语音转写（sherpa-onnx）的原生库只带 arm64-v8a：完整 AAR 含四个
+            // ABI，全带上会让 APK 多出 75MB，而 228MB 的 SenseVoice 模型在 32 位
+            // 设备上本来也跑不动。显式声明，避免装到缺原生库的设备上再崩。
+            abiFilters 'arm64-v8a'
         }
     }
 
@@ -139,6 +147,26 @@ dependencies {
     implementation "androidx.glance:glance-appwidget:${rootProject.ext.glance_version}"
     implementation "androidx.glance:glance-material3:${rootProject.ext.glance_version}"
     implementation "androidx.work:work-runtime-ktx:${rootProject.ext.work_version}"
+
+    // Markdown folder sync: SAF access to a user-chosen folder (e.g. a OneDrive sync folder).
+    implementation "androidx.documentfile:documentfile:1.0.1"
+
+    // 网页链接读取：OkHttp 抓页面 → jsoup 解析 DOM → Readability4J 抽正文 →
+    // flexmark 转成 Markdown 追加进笔记。图片不下载，只保留远程链接。
+    implementation "org.jsoup:jsoup:${rootProject.ext.jsoup_version}"
+    implementation "net.dankito.readability4j:readability4j:${rootProject.ext.readability4j_version}"
+    implementation "com.vladsch.flexmark:flexmark-html2md-converter:${rootProject.ext.flexmark_version}"
+    // readability4j 只在 pom 里声明了 slf4j-api，Gradle 的 module 元数据没有带进来。
+    // 不显式补上的话，第一次解析网页时会 NoClassDefFoundError（编译期看不出来）。
+    implementation "org.slf4j:slf4j-api:${rootProject.ext.slf4j_version}"
+    // 不接日志后端，免得启动时打印 "Failed to load class StaticLoggerBinder"
+    runtimeOnly "org.slf4j:slf4j-nop:${rootProject.ext.slf4j_version}"
+
+    // 端侧语音转写：sherpa-onnx 的 Kotlin API 与 JNI 绑定。
+    // 原生库（libsherpa-onnx-jni.so / libonnxruntime.so 等，arm64-v8a，约 30MB）
+    // 放在 src/main/jniLibs/arm64-v8a/，AGP 会自动打包，不需要 NDK 编译源码。
+    // 模型文件（约 228MB）不进 APK，由 App 在用户同意后自行下载。
+    implementation files('libs/sherpa-onnx.jar')
 }
 
 ksp {

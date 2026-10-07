@@ -110,3 +110,15 @@
 -dontwarn org.conscrypt.**
 -dontwarn org.bouncycastle.**
 -dontwarn org.openjsse.**
+
+# ---------------------------------------------------------------------------
+# sherpa-onnx
+#
+# JNI 层按全限定名解析这些类与它们的字段/方法（native 方法通过名字直接绑定，
+# 配置类通过反射读写字段），混淆或裁剪任意一项都会在运行期变成
+# UnsatisfiedLinkError / NoSuchFieldError——而且只在 release 包上出现，
+# debug 包看不出来。整体保留最稳妥，包体代价可以忽略（classes.jar 仅 233KB）。
+# ---------------------------------------------------------------------------
+-keep class com.k2fsa.sherpa.onnx.** { *; }
+-keepclassmembers class com.k2fsa.sherpa.onnx.** { *; }
+-dontwarn com.k2fsa.sherpa.onnx.**

@@ -1,46 +1,32 @@
-# Moe Memos
+# 闪记SJ（ShanJi SJ）
 
-[![justforfunnoreally.dev badge](https://img.shields.io/badge/justforfunnoreally-dev-9ff)](https://justforfunnoreally.dev)
+一个本地优先的 Markdown 笔记 App（Android），在 [MoeMemosAndroid](https://github.com/mudkipme/MoeMemosAndroid) 基础上改造。
 
-<img alt="Moe Memos" src="https://memos.moe/memos.png" width="160" height="160" />
+所有笔记以 `.md` 文件落在你自己选的文件夹里（SAF 双向镜像），不依赖任何服务器也能用。
 
-**Moe Memos** is an app to help you capture thoughts and ideas.
+## 与上游的主要差别
 
-You can use Moe Memos with either a self-hosted [✍️memos](https://github.com/usememos/memos) server or locally on your device (no server required).
+- **Markdown 文件夹镜像**：笔记以 `.md` 落盘（YAML front matter + 正文），应用与文件夹双向同步，两边改动都能看到。
+- **链接读取正文**：撰写页粘贴网址后点「读取正文」，抓取正文转 Markdown 追加到笔记；被站点拦截时降级保存标题 + 摘要，链接始终保留。
+- **灵感卡片只露标题**：列表卡片标题最多 3 行；标题层级统一，卡片五级、内页四级。
+- **长文详情页渐进渲染**：首屏只渲染前 24 行，底部「继续展开」分批加载；图片进入视口才发请求，加载前是固定高度占位——抓下来的长文（几百行、几十张图）打开不再掉帧。
+- **标签防污染**：正文里 URL 的 `#` 片段不会被误判成标签。
+- **界面中文化**：沿用上游多语言结构，补齐中文文案。
 
-**Note: Current Moe Memos version supports Memos 0.21.0 and Memos 0.27.0 to 0.31.0. Memos update may introduce breaking API changes. If you are using a version higher than 0.31.0, it is recommended to use [Mortis](https://github.com/mudkipme/mortis) to convert the newer Memos API to the Memos 0.21.0 API and re-login in Moe Memos.**
+## 构建
 
-## Installation
+```bash
+bash build.sh assembleDebug     # 出 APK
+bash build.sh testDebugUnitTest # 跑单元测试
+```
 
-[<img src="https://fdroid.gitlab.io/artwork/badge/get-it-on.png"
-     alt="Get it on F-Droid"
-     height="80">](https://f-droid.org/packages/me.mudkip.moememos/)
-[<img src="https://play.google.com/intl/en_us/badges/images/generic/en-play-badge.png"
-     alt="Get it on Google Play"
-     height="80">](https://play.google.com/store/apps/details?id=me.mudkip.moememos)
+需要 JDK 17+ 与 Android SDK（Gradle 会自行下载依赖）。
 
-Or download and install the APK package from the [Releases section](https://github.com/mudkipme/MoeMemosAndroid/releases/latest).
+## 版本
 
-## Features
+当前 `versionName 2.0.20` / `versionCode 64`（见 `app/build.gradle`）。
 
-- Write memos like tweeting to yourself
-- Use Moe Memos locally on your device (with backup and restore) or sync with your own ✍️memos server
-- Offline-first experience with automatic sync when you are back online
-- Material You design with dynamic themes and themed icon
-- Rich memo content: Markdown editor and renderer, images, non-image attachments, and to-do items
-- Organize and find memos with tags, pinning, and search
-- Home screen widget and share sheet integration (text, images, and webpages)
-- View your memo activity with a progress graph
-- Full privacy protection, no data collection
+## 许可证
 
-Moe Memos is a third-party client for [✍️memos](https://github.com/usememos/memos) and both projects aren't affiliated with each other.
-
-## Development
-
-Moe Memos tends to keep minimal and optimized for best native experience. The Android version is developed with Kotlin and Jetpack Compose.
-
-Any contributions are greatly appreciated.
-
-## License
-
-The Android version of Moe Memos is under [GPLv3](LICENSE).
+本项目继承上游许可：**GNU General Public License v3.0**（见 `LICENSE`）。
+上游版权归 MoeMemosAndroid 作者所有，本仓库仅在其上做改造。

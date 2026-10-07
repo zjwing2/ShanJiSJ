@@ -9,6 +9,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DrawerState
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.material3.FabPosition
 import androidx.compose.material3.Icon
 import me.mudkip.moememos.ui.component.ActionIconButton
 import androidx.compose.material3.Scaffold
@@ -127,6 +128,8 @@ private fun MemosHomePageContent(
                 icon = { Icon(Icons.Filled.Add, contentDescription = R.string.compose.string) }
             )
         },
+        // 闪念笔记的第一动作就是「记」，新建按钮放底部居中，拇指一抬就够到
+        floatingActionButtonPosition = FabPosition.Center,
 
         content = { innerPadding ->
             MemosList(

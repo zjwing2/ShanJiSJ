@@ -33,10 +33,12 @@ import kotlinx.coroutines.withContext
 import me.mudkip.moememos.MoeMemosFileProvider
 import me.mudkip.moememos.R
 import me.mudkip.moememos.data.local.entity.ResourceEntity
+import me.mudkip.moememos.data.local.localFileOf
 import me.mudkip.moememos.data.model.ResourceRepresentable
 import me.mudkip.moememos.ext.string
 import me.mudkip.moememos.viewmodel.LocalMemos
 import me.mudkip.moememos.viewmodel.LocalUserState
+import me.mudkip.moememos.viewmodel.MemosViewModel
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import timber.log.Timber
@@ -45,8 +47,19 @@ import java.io.File
 @Composable
 fun Attachment(
     resource: ResourceRepresentable,
-    onRemove: (() -> Unit)? = null
+    onRemove: (() -> Unit)? = null,
+    transcribeMemoIdentifier: String? = null
 ) {
+    // 音频走专用组件：本地文件直接内嵌播放，不必先拉起系统分享面板。
+    if (resource.mimeType?.startsWith("audio/") == true) {
+        AudioAttachment(
+            resource = resource,
+            onRemove = onRemove,
+            transcribeMemoIdentifier = transcribeMemoIdentifier
+        )
+        return
+    }
+
     val context = LocalContext.current
     val memosViewModel = LocalMemos.current
     val userStateViewModel = LocalUserState.current
@@ -61,35 +74,17 @@ fun Attachment(
         scope.launch {
             opening = true
             try {
-                val localFile = resolveAttachmentFile(
+                val shared = shareAttachment(
                     context = context,
                     resource = resource,
                     okHttpClient = userStateViewModel.okHttpClient,
                     cacheCanonical = { resourceIdentifier, downloadedUri ->
-                        val result = memosViewModel.cacheResourceFile(resourceIdentifier, downloadedUri)
-                        if (result is ApiResponse.Success) {
-                            memosViewModel.getResourceById(resourceIdentifier)
-                        } else {
-                            null
-                        }
+                        resourceCacheUpdater(memosViewModel, resourceIdentifier, downloadedUri)
                     }
                 )
-                if (localFile == null) {
+                if (!shared) {
                     Toast.makeText(context, R.string.failed_to_open_attachment.string, Toast.LENGTH_SHORT).show()
-                    return@launch
                 }
-                val fileUri = MoeMemosFileProvider.getFileUri(context, localFile)
-                val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                    type = resolveMimeType(resource, localFile)
-                    putExtra(Intent.EXTRA_STREAM, fileUri)
-                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                    clipData = ClipData.newUri(
-                        context.contentResolver,
-                        resource.filename.ifBlank { "attachment" },
-                        fileUri
-                    )
-                }
-                context.startActivity(Intent.createChooser(shareIntent, null))
             } catch (e: Throwable) {
                 Timber.d(e)
                 Toast.makeText(context, R.string.failed_to_open_attachment.string, Toast.LENGTH_SHORT).show()
@@ -154,6 +149,53 @@ fun Attachment(
     }
 }
 
+/**
+ * 把附件交给系统（分享面板 / 用其他应用打开）。
+ *
+ * 本地账号下文件就在应用目录里，直接分享；远程账号下先下载、回写缓存再分享。
+ * 返回 false 表示文件取不到或没有任何应用可以接收。
+ */
+internal suspend fun shareAttachment(
+    context: Context,
+    resource: ResourceRepresentable,
+    okHttpClient: OkHttpClient,
+    cacheCanonical: suspend (resourceIdentifier: String, downloadedUri: android.net.Uri) -> ResourceEntity?
+): Boolean {
+    val localFile = resolveAttachmentFile(context, resource, okHttpClient, cacheCanonical) ?: return false
+    val fileUri = MoeMemosFileProvider.getFileUri(context, localFile)
+    val shareIntent = Intent(Intent.ACTION_SEND).apply {
+        type = resolveMimeType(resource, localFile)
+        putExtra(Intent.EXTRA_STREAM, fileUri)
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        clipData = ClipData.newUri(
+            context.contentResolver,
+            resource.filename.ifBlank { "attachment" },
+            fileUri
+        )
+    }
+    return try {
+        context.startActivity(Intent.createChooser(shareIntent, null))
+        true
+    } catch (e: Throwable) {
+        Timber.d(e)
+        false
+    }
+}
+
+/** 把刚下载的附件登记进 Room，并把更新后的实体回给 [resolveAttachmentFile] 复用。 */
+internal suspend fun resourceCacheUpdater(
+    memosViewModel: MemosViewModel,
+    resourceIdentifier: String,
+    downloadedUri: android.net.Uri
+): ResourceEntity? {
+    val result = memosViewModel.cacheResourceFile(resourceIdentifier, downloadedUri)
+    return if (result is ApiResponse.Success) {
+        memosViewModel.getResourceById(resourceIdentifier)
+    } else {
+        null
+    }
+}
+
 private suspend fun resolveAttachmentFile(
     context: Context,
     resource: ResourceRepresentable,
@@ -182,14 +224,7 @@ private suspend fun resolveAttachmentFile(
     return canonical
 }
 
-private fun existingLocalFile(resource: ResourceRepresentable): File? {
-    val local = (resource.localUri ?: resource.uri).toUri()
-    if (local.scheme != "file") {
-        return null
-    }
-    val path = local.path ?: return null
-    return File(path).takeIf { it.exists() }
-}
+internal fun existingLocalFile(resource: ResourceRepresentable): File? = localFileOf(resource)
 
 private suspend fun downloadAttachment(
     context: Context,

@@ -14,7 +14,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.draw.clip
@@ -28,12 +32,12 @@ import me.mudkip.moememos.ui.page.common.LocalRootNavController
 import me.mudkip.moememos.ui.page.common.RouteName
 import me.mudkip.moememos.ui.media.MediaViewerActivity
 import me.mudkip.moememos.viewmodel.LocalUserState
-import org.intellij.markdown.IElementType
-import org.intellij.markdown.MarkdownElementTypes
-import org.intellij.markdown.MarkdownTokenTypes
-import org.intellij.markdown.ast.ASTNode
-import org.intellij.markdown.flavours.gfm.GFMElementTypes
-import me.mudkip.moememos.util.parseMarkdown
+import me.mudkip.moememos.util.DETAIL_HEADING_LEVEL
+import me.mudkip.moememos.util.extractPreviewContent
+import me.mudkip.moememos.util.normalizeHeadingLevel
+import me.mudkip.moememos.util.PROGRESSIVE_CHUNK_LINES
+import me.mudkip.moememos.util.PROGRESSIVE_FIRST_LINES
+import me.mudkip.moememos.util.splitProgressiveContent
 import java.net.URLEncoder
 import kotlin.math.ceil
 
@@ -41,19 +45,33 @@ import kotlin.math.ceil
 fun MemoContent(
     memo: MemoRepresentable,
     previewMode: Boolean = false,
+    progressive: Boolean = false,
     checkboxChange: (checked: Boolean, startOffset: Int, endOffset: Int) -> Unit = { _, _, _ -> },
     onViewMore: (() -> Unit)? = null,
     selectable: Boolean = false,
-    onTagClick: ((String) -> Unit)? = null
+    onTagClick: ((String) -> Unit)? = null,
+    audioTranscribeMemoIdentifier: String? = null
 ) {
     val rootNavController = LocalRootNavController.current
-    val (text, previewed) = remember(memo.content, previewMode) {
-        if (previewMode) {
-            extractPreviewContent(markdownText = memo.content)
-        } else {
-            Pair(memo.content, false)
+    // progressive 只在详情页开：列表卡片本来就只露 3 行，不需要再切一刀
+    var visibleLines by remember(memo.content) { mutableIntStateOf(PROGRESSIVE_FIRST_LINES) }
+    val collapsed = remember(memo.content, previewMode, progressive, visibleLines) {
+        when {
+            previewMode -> extractPreviewContent(markdownText = memo.content)
+            // 内页（详情页）：标题一律按四级显示。笔记里的层级是历史遗留的，
+            // 有 `##` 也有 `####`，不统一的话打开不同笔记标题大小不一样。
+            progressive -> {
+                val (head, more) = splitProgressiveContent(
+                    markdownText = memo.content,
+                    firstLines = visibleLines,
+                )
+                Pair(normalizeHeadingLevel(head, DETAIL_HEADING_LEVEL), more)
+            }
+            else -> Pair(memo.content, false)
         }
     }
+    val (collapsedText, hasMore) = collapsed
+    val text = collapsedText
     val handleTagClick = remember(rootNavController, onTagClick) {
         onTagClick ?: { tag ->
             rootNavController.navigate("${RouteName.TAG}/${URLEncoder.encode(tag, "UTF-8")}") {
@@ -74,9 +92,9 @@ fun MemoContent(
             onTagClick = handleTagClick
         )
 
-        MemoResourceContent(memo)
+        MemoResourceContent(memo, audioTranscribeMemoIdentifier)
 
-        if (previewed && onViewMore != null) {
+        if (previewMode && hasMore && onViewMore != null) {
             Row {
                 Text(
                     text = R.string.view_more.string,
@@ -86,158 +104,23 @@ fun MemoContent(
                 )
             }
         }
-    }
-}
 
-private const val PREVIEW_UNBREAKABLE_COST = 100
-private enum class PreviewAppendKind {
-    NONE,
-    TEXT,
-    UNBREAKABLE
-}
-
-fun extractPreviewContent(markdownText: String, maxLength: Int = 500): Pair<String, Boolean> {
-    val node = parseMarkdown(markdownText)
-
-    val result = StringBuilder()
-    var remainingLength = maxLength
-    var truncated = false
-    var lastAppendKind = PreviewAppendKind.NONE
-
-    fun appendNodeText(child: ASTNode): Boolean {
-        if (remainingLength <= 0) {
-            truncated = true
-            return false
-        }
-        val content = markdownText.substring(child.startOffset, child.endOffset)
-        if (content.isEmpty()) {
-            return true
-        }
-        if (content.length <= remainingLength) {
-            result.append(content)
-            remainingLength -= content.length
-            lastAppendKind = PreviewAppendKind.TEXT
-            return true
-        }
-        result.append(content.take(remainingLength))
-        remainingLength = 0
-        truncated = true
-        lastAppendKind = PreviewAppendKind.TEXT
-        return false
-    }
-
-    fun appendUnbreakableNode(child: ASTNode): Boolean {
-        if (remainingLength < PREVIEW_UNBREAKABLE_COST) {
-            truncated = true
-            return false
-        }
-        result.append(markdownText.substring(child.startOffset, child.endOffset))
-        remainingLength -= PREVIEW_UNBREAKABLE_COST
-        lastAppendKind = PreviewAppendKind.UNBREAKABLE
-        return true
-    }
-
-    lateinit var extractNodeContent: (ASTNode) -> Boolean
-    lateinit var extractBlockContent: (ASTNode) -> Boolean
-
-    extractNodeContent = { child ->
-        if (isUnbreakablePreviewNode(child)) {
-            appendUnbreakableNode(child)
-        } else if (child.children.isEmpty()) {
-            appendNodeText(child)
-        } else {
-            var allSuccess = true
-            for (grandChild in child.children) {
-                val success = if (isBreakablePreviewBlock(grandChild.type)) {
-                    extractBlockContent(grandChild)
-                } else {
-                    extractNodeContent(grandChild)
-                }
-                if (!success) {
-                    allSuccess = false
-                    break
-                }
-            }
-            allSuccess
-        }
-    }
-
-    extractBlockContent = { child ->
-        var allSuccess = true
-        val isParagraph = child.type == MarkdownElementTypes.PARAGRAPH
-        for (grandChild in child.children) {
-            val success = if (isParagraph) {
-                extractNodeContent(grandChild)
-            } else if (isBreakablePreviewBlock(grandChild.type)) {
-                extractBlockContent(grandChild)
-            } else if (isPreviewWhitespaceToken(grandChild) || grandChild.children.isEmpty()) {
-                appendNodeText(grandChild)
-            } else {
-                appendUnbreakableNode(grandChild)
-            }
-            if (!success) {
-                allSuccess = false
-                break
+        // 长文一次铺完会掉帧，所以一段一段加：每次点「继续展开」多渲染一批
+        if (hasMore && progressive && !previewMode) {
+            Row(modifier = Modifier.padding(top = 6.dp)) {
+                Text(
+                    text = R.string.expand_more.string,
+                    color = MaterialTheme.colorScheme.primary,
+                    style = MaterialTheme.typography.bodyMedium.copy(textDecoration = TextDecoration.Underline),
+                    modifier = Modifier.clickable { visibleLines += PROGRESSIVE_CHUNK_LINES }
+                )
             }
         }
-        allSuccess
     }
-
-    for (child in node.children) {
-        val success = if (isBreakablePreviewBlock(child.type)) {
-            extractBlockContent(child)
-        } else if (isPreviewWhitespaceToken(child)) {
-            appendNodeText(child)
-        } else {
-            appendUnbreakableNode(child)
-        }
-        if (!success) {
-            break
-        }
-    }
-
-    if (truncated && lastAppendKind == PreviewAppendKind.TEXT) {
-        val preview = result.toString().trimEnd()
-        val withEllipsis = if (preview.endsWith("…")) preview else "$preview…"
-        return Pair(withEllipsis, true)
-    }
-
-    return Pair(result.toString(), truncated)
-}
-
-private fun isBreakablePreviewBlock(type: IElementType): Boolean {
-    return type == MarkdownElementTypes.MARKDOWN_FILE ||
-        type == MarkdownElementTypes.PARAGRAPH ||
-        type == MarkdownElementTypes.LIST_ITEM ||
-        type == MarkdownElementTypes.BLOCK_QUOTE ||
-        type == MarkdownElementTypes.ORDERED_LIST ||
-        type == MarkdownElementTypes.UNORDERED_LIST
-}
-
-private fun isUnbreakablePreviewNode(node: ASTNode): Boolean {
-    return node.type == MarkdownElementTypes.IMAGE ||
-        node.type == MarkdownElementTypes.CODE_BLOCK ||
-        node.type == MarkdownElementTypes.CODE_FENCE ||
-        node.type == GFMElementTypes.TABLE ||
-        node.type == MarkdownElementTypes.ATX_1 ||
-        node.type == MarkdownElementTypes.ATX_2 ||
-        node.type == MarkdownElementTypes.ATX_3 ||
-        node.type == MarkdownElementTypes.ATX_4 ||
-        node.type == MarkdownElementTypes.ATX_5 ||
-        node.type == MarkdownElementTypes.ATX_6 ||
-        node.type == MarkdownElementTypes.SETEXT_1 ||
-        node.type == MarkdownElementTypes.SETEXT_2 ||
-        node.type == MarkdownTokenTypes.HORIZONTAL_RULE ||
-        node.type == MarkdownElementTypes.LINK_DEFINITION ||
-        node.type.toString().contains("HTML")
-}
-
-private fun isPreviewWhitespaceToken(node: ASTNode): Boolean {
-    return node.type == MarkdownTokenTypes.EOL || node.type == MarkdownTokenTypes.WHITE_SPACE
 }
 
 @Composable
-fun MemoResourceContent(memo: MemoRepresentable) {
+fun MemoResourceContent(memo: MemoRepresentable, transcribeMemoIdentifier: String? = null) {
     val cols = 3
     val context = LocalContext.current
     val imageList = memo.resources.filter { it.mimeType?.startsWith("image/") == true }
@@ -278,6 +161,6 @@ fun MemoResourceContent(memo: MemoRepresentable) {
         }
     }
     memo.resources.filterNot { it.mimeType?.startsWith("image/") == true }.forEach { resource ->
-        Attachment(resource)
+        Attachment(resource, transcribeMemoIdentifier = transcribeMemoIdentifier)
     }
 }

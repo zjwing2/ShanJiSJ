@@ -85,6 +85,14 @@ fun LocalAccountPage(
             }
         }
 
+        item {
+            FolderSyncSection()
+        }
+
+        item {
+            TranscriptionSection()
+        }
+
         if (showSwitchAccountButton) {
             item {
                 FilledTonalButton(

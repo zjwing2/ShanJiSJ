@@ -160,7 +160,9 @@ internal fun MemoDetailContent(memoIdentifier: String, onBack: () -> Unit) {
 
             MemoContent(
                 memo = memo,
+                progressive = true,
                 selectable = true,
+                audioTranscribeMemoIdentifier = memo.identifier,
                 checkboxChange = { checked, startOffset, endOffset ->
                     scope.launch {
                         var text = memo.content.substring(startOffset, endOffset)

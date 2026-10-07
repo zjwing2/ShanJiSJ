@@ -1,10 +1,32 @@
 package me.mudkip.moememos.ui.component
 
+import android.content.Intent
 import android.net.Uri
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
-import androidx.compose.material3.Checkbox
+import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalMinimumInteractiveComponentSize
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.res.stringResource
+import androidx.compose.material3.Checkbox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.remember
@@ -26,7 +48,11 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withLink
 import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
+import androidx.compose.foundation.Image
+import coil3.compose.SubcomposeAsyncImage
+import coil3.request.ImageRequest
 import com.mikepenz.markdown.coil3.Coil3ImageTransformerImpl
+import com.mikepenz.markdown.compose.components.MarkdownComponentModel
 import com.mikepenz.markdown.compose.components.markdownComponents
 import com.mikepenz.markdown.compose.elements.MarkdownCheckBox
 import com.mikepenz.markdown.compose.elements.highlightedCodeBlock
@@ -38,6 +64,9 @@ import com.mikepenz.markdown.model.markdownAnnotator
 import com.mikepenz.markdown.model.markdownAnnotatorConfig
 import com.mikepenz.markdown.model.rememberMarkdownState
 import com.mikepenz.markdown.utils.getUnescapedTextInNode
+import me.mudkip.moememos.R
+import me.mudkip.moememos.ui.media.MediaViewerActivity
+import me.mudkip.moememos.util.extractMarkdownImageLink
 import me.mudkip.moememos.util.findCustomTagMatches
 import me.mudkip.moememos.util.getCustomTagName
 import me.mudkip.moememos.util.isCustomTagSupportedNode
@@ -161,6 +190,9 @@ fun Markdown(
             components = markdownComponents(
                 codeFence = highlightedCodeFence,
                 codeBlock = highlightedCodeBlock,
+                image = { model ->
+                    LazyMarkdownImage(model = model, imageBaseUrl = imageBaseUrl)
+                },
                 checkbox = {
                     val node = it.node
                     MarkdownCheckBox(
@@ -195,6 +227,105 @@ fun Markdown(
         }
     } else {
         markdownContent()
+    }
+}
+
+/**
+ * 详情页里的远程图片：滚到眼前才加载，没加载前先占一块固定高度的空位。
+ *
+ * 一篇抓下来的文章可能有五十多张图，全量渲染时每张图加载完高度一变，
+ * 整列就要重新布局一次，实测进页面掉一百多帧。这里只做一件事——
+ * **没进入视口就不发请求**，把几十张图同时抢主线程变成几张。
+ *
+ * 占位高度写死是刻意的：高度稳定，图还没加载时整列不用反复重排。
+ * 加载完成后换成按原图宽高比撑开（见 success 分支），观感和以前一致。
+ */
+private val IMAGE_PLACEHOLDER_HEIGHT = 220.dp
+
+@Composable
+private fun LazyMarkdownImage(
+    model: MarkdownComponentModel,
+    imageBaseUrl: String?,
+) {
+    val context = LocalContext.current
+    val link = remember(model.content) { extractMarkdownImageLink(model.content) }
+    var requested by remember(model.content) { mutableStateOf(false) }
+    // 用 View 的实际像素高，省得再换算 dp
+    val viewportHeightPx = LocalView.current.height.toFloat()
+
+    if (requested && link != null) {
+        SubcomposeAsyncImage(
+            model = ImageRequest.Builder(context)
+                .data(resolveMarkdownImageLink(link, imageBaseUrl))
+                .build(),
+            contentDescription = null,
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable {
+                    context.startActivity(
+                        Intent(context, MediaViewerActivity::class.java).apply {
+                            putExtra(
+                                MediaViewerActivity.EXTRA_IMAGE_URLS,
+                                arrayOf(resolveMarkdownImageLink(link, imageBaseUrl))
+                            )
+                            putExtra(MediaViewerActivity.EXTRA_INITIAL_INDEX, 0)
+                        }
+                    )
+                },
+            loading = { MarkdownImagePlaceholder() },
+            error = { MarkdownImagePlaceholder() },
+            success = { state ->
+                Image(
+                    painter = state.painter,
+                    contentDescription = null,
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(6.dp))
+                )
+            }
+        )
+        return
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(IMAGE_PLACEHOLDER_HEIGHT)
+            .clip(RoundedCornerShape(6.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .onGloballyPositioned { coordinates ->
+                // 视口下方一屏内就开始加载，滚到眼前时图通常已经在了
+                if (!requested && coordinates.positionInRoot().y < viewportHeightPx * 2) {
+                    requested = true
+                }
+            }
+            .clickable(enabled = link != null) { requested = true },
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = stringResource(R.string.image_placeholder),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+@Composable
+private fun MarkdownImagePlaceholder() {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(IMAGE_PLACEHOLDER_HEIGHT)
+            .clip(RoundedCornerShape(6.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = stringResource(R.string.image_placeholder),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
     }
 }
 

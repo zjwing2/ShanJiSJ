@@ -1,16 +1,29 @@
 package me.mudkip.moememos.ui.page.memoinput
 
+import android.Manifest
 import android.content.ActivityNotFoundException
+import android.content.pm.PackageManager
 import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts.OpenDocument
+import androidx.activity.result.contract.ActivityResultContracts.RequestPermission
 import androidx.activity.result.contract.ActivityResultContracts.TakePicture
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -21,10 +34,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -34,18 +51,24 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import me.mudkip.moememos.MoeMemosFileProvider
+import me.mudkip.moememos.R
+import me.mudkip.moememos.data.local.VoiceRecorder
 import me.mudkip.moememos.data.model.MemoVisibility
 import me.mudkip.moememos.data.model.ShareContent
+import me.mudkip.moememos.data.web.stripSoleUrlBody
 import me.mudkip.moememos.ext.popBackStackIfLifecycleIsResumed
+import me.mudkip.moememos.ext.string
 import me.mudkip.moememos.ext.suspendOnErrorMessage
 import me.mudkip.moememos.ui.page.common.LocalRootNavController
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts.PickMultipleVisualMedia
 import androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia
 import me.mudkip.moememos.util.extractCustomTags
+import me.mudkip.moememos.util.findFirstWebUrl
 import me.mudkip.moememos.viewmodel.LocalMemos
 import me.mudkip.moememos.viewmodel.LocalUserState
 import me.mudkip.moememos.viewmodel.MemoInputViewModel
+import me.mudkip.moememos.viewmodel.TranscriptionState
 
 private const val MaxSelectableImages = 100
 
@@ -58,6 +81,7 @@ fun MemoInputPage(
     val focusRequester = remember { FocusRequester() }
     val coroutineScope = rememberCoroutineScope()
     val snackbarState = remember { SnackbarHostState() }
+    val context = LocalContext.current
     val navController = LocalRootNavController.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val memosViewModel = LocalMemos.current
@@ -98,6 +122,16 @@ fun MemoInputPage(
     }
 
     fun submit() = coroutineScope.launch {
+        // 还在录音就先收尾（并等它挂上笔记）：录好的东西不能因为点了发送就丢
+        if (viewModel.voiceRecorder.isActive) {
+            viewModel.finishRecording(autosaveIdentifier ?: memo?.identifier)
+            // 刚录的这段还在转写，等它落进正文再提交：否则提交后页面销毁，
+            // 转写被连带取消，这条语音就只有音频没有文字。
+            viewModel.awaitTranscription()
+        }
+        // 抓取同理：用户常常「粘链接 → 抓取 → 立刻发送」，不等的话
+        // 抓下来的正文会随着页面销毁而无处安放
+        viewModel.awaitLinkFetch()
         val tags = extractCustomTags(text.text)
 
         if (autosaveEnabled && isUntouchedExistingMemo()) {
@@ -138,8 +172,16 @@ fun MemoInputPage(
     }
 
     fun handleExit() {
+        // 离开页面时放弃未完成的录音：半截音频没有价值，留着只会变成垃圾文件
+        if (viewModel.voiceRecorder.isActive) {
+            viewModel.cancelRecording()
+        }
+        // 正在抓的网页同样放弃：正文马上要随页面一起消失，抓完也无处可写
+        viewModel.cancelFetchWebPage()
         if (autosaveEnabled) {
             coroutineScope.launch {
+                // 转写还在跑就先等它：文字要先落进正文，才能被这次自动保存带上
+                viewModel.awaitTranscription()
                 // Only a row this editor created may be discarded. `memo` is also null when editing a
                 // memo the list has not loaded (e.g. after process death); that memo must not be deleted.
                 val autosaveRow = viewModel.autosaveIdentifier
@@ -160,10 +202,14 @@ fun MemoInputPage(
             }
             return
         }
-        if (text.text != initialContent || viewModel.uploadResources.size != (baseline?.resources?.size ?: 0)) {
-            showExitConfirmation = true
-        } else {
-            navController.popBackStackIfLifecycleIsResumed(lifecycleOwner)
+        coroutineScope.launch {
+            // 同上：关页面前让转写把文字交出来
+            viewModel.awaitTranscription()
+            if (text.text != initialContent || viewModel.uploadResources.size != (baseline?.resources?.size ?: 0)) {
+                showExitConfirmation = true
+            } else {
+                navController.popBackStackIfLifecycleIsResumed(lifecycleOwner)
+            }
         }
     }
 
@@ -205,6 +251,83 @@ fun MemoInputPage(
         }
     }
 
+    // ---------------------------------------------------------------- 语音转写
+
+    val transcriptionState = viewModel.transcriptionState
+
+    // 转写结果是一次性事件，收到就追加到正文末尾，并把光标跟过去。
+    // 必须放在 LaunchedEffect 里收集：转写可能比用户停留更久，
+    // 也可能在录音结束前就回来了。
+    LaunchedEffect(Unit) {
+        viewModel.appendEvents.collect { block ->
+            val updated = text.text + block
+            text = TextFieldValue(updated, TextRange(updated.length))
+            autosaveDirty = true
+            snackbarState.showSnackbar(context.getString(R.string.transcription_done))
+        }
+    }
+
+    // ---------------------------------------------------------------- 网页正文读取
+
+    // 正文里出现的第一个链接，用来提示「可以抓正文」。按文本变化重算：
+    // 输入框里的字符串本来就每次敲键都会换一个，正则很便宜，不值得再加一层缓存。
+    val detectedUrl = remember(text.text) { findFirstWebUrl(text.text) }
+
+    // 已经抓过一次的地址不再重复提示：正文里已经带着它了，一直提示只会碍事。
+    var fetchedUrl by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(Unit) {
+        viewModel.linkEvents.collect { append ->
+            // 正文里如果只有用户刚粘的那条地址，抓完就把它换成网页块——
+            // 那行只是触发抓取的动作，块头里已经带了出处，留着就成了同一个地址写两遍。
+            val base = stripSoleUrlBody(
+                text = text.text,
+                requestedUrl = append.requestedUrl,
+                resolvedUrl = append.resolvedUrl,
+            )
+            val updated = if (base.isBlank()) {
+                append.block.trimStart()
+            } else {
+                base + append.block
+            }
+            text = TextFieldValue(updated, TextRange(updated.length))
+            autosaveDirty = true
+            snackbarState.showSnackbar(context.getString(R.string.web_link_fetched))
+        }
+    }
+
+    // ---------------------------------------------------------------- 录音
+
+    val recorder = viewModel.voiceRecorder
+
+    fun startRecording() {
+        if (!viewModel.startRecording()) {
+            coroutineScope.launch {
+                snackbarState.showSnackbar(context.getString(R.string.recording_failed))
+            }
+        }
+    }
+
+    val recordAudioPermission = rememberLauncherForActivityResult(RequestPermission()) { granted ->
+        if (granted) {
+            startRecording()
+        } else {
+            coroutineScope.launch {
+                snackbarState.showSnackbar(context.getString(R.string.microphone_permission_denied))
+            }
+        }
+    }
+
+    fun requestRecording() {
+        val granted = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
+            PackageManager.PERMISSION_GRANTED
+        if (granted) {
+            startRecording()
+        } else {
+            recordAudioPermission.launch(Manifest.permission.RECORD_AUDIO)
+        }
+    }
+
     BackHandler {
         handleExit()
     }
@@ -220,46 +343,105 @@ fun MemoInputPage(
             )
         },
         bottomBar = {
-            MemoInputBottomBar(
-                currentAccount = currentAccount,
-                currentVisibility = currentVisibility,
-                showSpaceVisibility = memo?.visibility == MemoVisibility.SPACE,
-                visibilityMenuExpanded = visibilityMenuExpanded,
-                onVisibilityExpandedChange = { visibilityMenuExpanded = it },
-                onVisibilitySelected = { currentVisibility = it },
-                tags = memosViewModel.tags.toList(),
-                tagMenuExpanded = tagMenuExpanded,
-                onTagExpandedChange = { tagMenuExpanded = it },
-                onHashTagClick = {
-                    text = replaceSelection(text, "#")
-                },
-                onTagSelected = { tag ->
-                    text = replaceSelection(text, "#$tag ")
-                },
-                onToggleTodoItem = {
-                    text = toggleTodoItemInText(text)
-                },
-                onPickImage = {
-                    pickImages.launch(PickVisualMediaRequest(PickVisualMedia.ImageOnly))
-                },
-                onPickAttachment = {
-                    pickAttachment.launch(arrayOf("*/*"))
-                },
-                onTakePhoto = {
-                    try {
-                        val uri = MoeMemosFileProvider.getImageUri(navController.context)
-                        photoImageUri = uri
-                        takePhoto.launch(uri)
-                    } catch (e: ActivityNotFoundException) {
-                        coroutineScope.launch {
-                            snackbarState.showSnackbar(e.localizedMessage ?: "Unable to take picture.")
+            Column {
+                LinkFetchBar(
+                    state = viewModel.linkFetchState,
+                    suggestedUrl = detectedUrl?.takeIf { it != fetchedUrl },
+                    onFetch = { url ->
+                        fetchedUrl = url
+                        viewModel.fetchWebPage(url)
+                    },
+                    onRetry = { viewModel.retryFetchWebPage() },
+                )
+                TranscriptionStatusBar(
+                    state = transcriptionState,
+                    onRetry = { viewModel.retryTranscription() },
+                )
+                if (recorder.isActive) {
+                    RecordingBar(
+                        recorder = recorder,
+                        onTick = { recorder.tick() },
+                        onPauseToggle = {
+                            if (recorder.state == VoiceRecorder.State.Recording) {
+                                recorder.pause()
+                            } else {
+                                recorder.resume()
+                            }
+                        },
+                        onDiscard = {
+                            viewModel.cancelRecording()
+                            coroutineScope.launch {
+                                snackbarState.showSnackbar(context.getString(R.string.recording_discarded))
+                            }
+                        },
+                        onFinish = {
+                            coroutineScope.launch {
+                                val response = viewModel.finishRecording(autosaveIdentifier ?: memo?.identifier)
+                                if (response == null) {
+                                    snackbarState.showSnackbar(context.getString(R.string.recording_too_short))
+                                } else {
+                                    response.suspendOnErrorMessage { message ->
+                                        snackbarState.showSnackbar(message)
+                                    }
+                                }
+                            }
                         }
-                    }
-                },
-                onFormat = { format ->
-                    text = applyMarkdownFormatToText(text, format)
+                    )
+                } else {
+                    MemoInputBottomBar(
+                        currentAccount = currentAccount,
+                        currentVisibility = currentVisibility,
+                        showSpaceVisibility = memo?.visibility == MemoVisibility.SPACE,
+                        visibilityMenuExpanded = visibilityMenuExpanded,
+                        onVisibilityExpandedChange = { visibilityMenuExpanded = it },
+                        onVisibilitySelected = { currentVisibility = it },
+                        tags = memosViewModel.tags.toList(),
+                        tagMenuExpanded = tagMenuExpanded,
+                        onTagExpandedChange = { tagMenuExpanded = it },
+                        onHashTagClick = {
+                            text = replaceSelection(text, "#")
+                        },
+                        onTagSelected = { tag ->
+                            text = replaceSelection(text, "#$tag ")
+                        },
+                        onToggleTodoItem = {
+                            text = toggleTodoItemInText(text)
+                        },
+                        onPickImage = {
+                            pickImages.launch(PickVisualMediaRequest(PickVisualMedia.ImageOnly))
+                        },
+                        onPickAttachment = {
+                            pickAttachment.launch(arrayOf("*/*"))
+                        },
+                        onTakePhoto = {
+                            try {
+                                val uri = MoeMemosFileProvider.getImageUri(navController.context)
+                                photoImageUri = uri
+                                takePhoto.launch(uri)
+                            } catch (e: ActivityNotFoundException) {
+                                coroutineScope.launch {
+                                    snackbarState.showSnackbar(e.localizedMessage ?: "Unable to take picture.")
+                                }
+                            }
+                        },
+                        onRecordAudio = { requestRecording() },
+                        onFetchLink = {
+                            val url = detectedUrl
+                            if (url == null) {
+                                coroutineScope.launch {
+                                    snackbarState.showSnackbar(context.getString(R.string.web_link_not_found))
+                                }
+                            } else {
+                                fetchedUrl = url
+                                viewModel.fetchWebPage(url)
+                            }
+                        },
+                        onFormat = { format ->
+                            text = applyMarkdownFormatToText(text, format)
+                        }
+                    )
                 }
-            )
+            }
         },
         snackbarHost = {
             SnackbarHost(hostState = snackbarState)
@@ -402,6 +584,61 @@ fun MemoInputPage(
             }
             if (memo == null && shareContent == null) {
                 viewModel.updateDraft(text.text)
+            }
+        }
+    }
+}
+
+/**
+ * 转写状态条，贴在输入页底部工具栏上方。
+ *
+ * 只占一行，且 `Idle` 时完全不占空间——转写是大多数时候不存在的背景过程，
+ * 不该常驻一块地方提醒用户它的存在。
+ *
+ * 失败时把重试按钮放在这里而不是弹窗：转写失败不影响录音已经存好这件事，
+ * 用户完全可以继续写笔记，所以不该用弹窗拦住他。
+ */
+@Composable
+private fun TranscriptionStatusBar(
+    state: TranscriptionState,
+    onRetry: () -> Unit,
+) {
+    when (state) {
+        is TranscriptionState.Idle -> Unit
+
+        is TranscriptionState.Busy -> Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp, vertical = 6.dp)
+        ) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(14.dp),
+                strokeWidth = 2.dp,
+            )
+            Text(
+                R.string.transcription_busy.string,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.outline,
+                modifier = Modifier.padding(start = 8.dp)
+            )
+        }
+
+        is TranscriptionState.Failed -> Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 20.dp, end = 8.dp)
+        ) {
+            Text(
+                state.message,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.weight(1f)
+            )
+            Spacer(Modifier.width(8.dp))
+            TextButton(onClick = onRetry) {
+                Text(R.string.transcription_retry.string)
             }
         }
     }

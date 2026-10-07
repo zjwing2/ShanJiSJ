@@ -36,6 +36,25 @@ internal fun findCustomTagMatches(text: String): Sequence<MatchResult> {
     return customTagPattern.findAll(text)
 }
 
+/**
+ * 网页正文里到处是「#138」「#2024」这类编号，中文还常写成「（2020 #138）」，
+ * 右括号会被正则一起吞进标签名。这类东西当标签既没检索价值，还会把标签列表
+ * 污染成一堆数字垃圾，所以剥掉首尾标点后，纯数字或空的一律不认。
+ */
+private val tagEdgePunctuation = setOf(
+    '）', '》', '」', '』', '、', '，', '。', '；', '：', '！', '？', '｝',
+    ')', '>', ']', '}', '.', ',', ';', ':', '!', '?', '"', '\'', '`'
+)
+
+private fun normalizeTagName(raw: String): String? {
+    var name = raw
+    while (name.isNotEmpty() && name.first() in tagEdgePunctuation) name = name.drop(1)
+    while (name.isNotEmpty() && name.last() in tagEdgePunctuation) name = name.dropLast(1)
+    if (name.isEmpty()) return null
+    if (name.all { it.isDigit() }) return null
+    return name
+}
+
 internal fun getCustomTagName(matchResult: MatchResult): String {
     return matchResult.groupValues[1]
 }
@@ -69,7 +88,7 @@ fun extractCustomTags(markdownText: String): Set<String> {
         val node = parsedTree.findNodeAtPosition(startPosition)
 
         if (node != null && isCustomTagSupportedNode(node)) {
-            tags.add(getCustomTagName(result))
+            normalizeTagName(getCustomTagName(result))?.let { tags.add(it) }
         }
     }
 
