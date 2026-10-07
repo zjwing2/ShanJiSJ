@@ -4,6 +4,13 @@
 
 所有笔记以 `.md` 文件落在你自己选的文件夹里（SAF 双向镜像），不依赖任何服务器也能用。
 
+## 下载
+
+- **最新 APK（v2.0.20，debug 版，约 57 MB）**：[ShanJiSJ-v2.0.20-debug.apk](https://github.com/zjwing2/ShanJiSJ/releases/download/v2.0.20/ShanJiSJ-v2.0.20-debug.apk)
+- 发布页（含历史版本与说明）：<https://github.com/zjwing2/ShanJiSJ/releases/tag/v2.0.20>
+
+> 安装提示：Android 需在「设置 → 安全 → 安装未知应用」中，对用来打开 APK 的浏览器 / 文件管理器授权，方可安装。
+
 ## 与上游的主要差别
 
 - **Markdown 文件夹镜像**：笔记以 `.md` 落盘（YAML front matter + 正文），应用与文件夹双向同步，两边改动都能看到。
