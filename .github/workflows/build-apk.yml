@@ -74,6 +74,26 @@ jobs:
           yes | sdkmanager --licenses > /dev/null 2>&1 || true
           sdkmanager --install "ndk;${MOEMEMOS_NDK_VERSION}"
 
+      # 诊断用：确认各插件仓库在 CI 上是否可达（结果写入 annotation 便于排查）
+      - name: Probe plugin repositories
+        if: always()
+        run: |
+          set +e
+          P="com/google/devtools/ksp/com.google.devtools.ksp.gradle.plugin/2.3.12/com.google.devtools.ksp.gradle.plugin-2.3.12.pom"
+          : > /tmp/probe.txt
+          for base in \
+            "https://maven.aliyun.com/repository/gradle-plugin" \
+            "https://maven.aliyun.com/repository/google" \
+            "https://plugins.gradle.org/m2" \
+            "https://dl.google.com/dl/android/maven2" \
+            "https://repo1.maven.org/maven2" ; do
+            code=$(curl -sL -o /dev/null -w '%{http_code}' --max-time 20 "$base/$P")
+            echo "$(echo "$base" | cut -d/ -f3) -> ${code:-ERR}" >> /tmp/probe.txt
+          done
+          cat /tmp/probe.txt
+          msg=$(awk '{printf "%s%%0A", $0}' /tmp/probe.txt)
+          echo "::warning title=RepoProbe::${msg}"
+
       # 单独一步先验证 wrapper 能否正常启动，便于在 CI 上快速定位故障环节
       - name: Gradle version check
         run: ./gradlew --version
