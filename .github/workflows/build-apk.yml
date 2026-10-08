@@ -86,7 +86,10 @@ jobs:
           tail -30 /tmp/gradle.log
           if [ "$code" -ne 0 ]; then
             # 把失败摘要以 annotation 形式暴露出来，便于定位
-            msg=$(tail -20 /tmp/gradle.log | awk '{printf "%s%%0A", $0}')
+            msg=$(grep -A 15 "What went wrong" /tmp/gradle.log | head -25 | awk '{printf "%s%%0A", $0}')
+            if [ -z "$msg" ]; then
+              msg=$(tail -25 /tmp/gradle.log | awk '{printf "%s%%0A", $0}')
+            fi
             echo "::error title=GradleFailure::${msg}"
             exit "$code"
           fi
