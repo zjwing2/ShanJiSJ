@@ -60,10 +60,21 @@ jobs:
       - name: Set up Gradle cache
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-        with:
-          packages: 'tools platform-tools'
+      # 原先用 android-actions/setup-android@v3，在新版 runner 上该 action 会失败；
+      # 改为直接取官方 command-line tools，行为完全可控。
+      - name: Set up Android command-line tools
+        run: |
+          set -eux
+          SDK="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+          echo "Android SDK root: $SDK"
+          mkdir -p "$SDK/cmdline-tools"
+          curl -fsSL -o /tmp/cmdline-tools.zip \
+            https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
+          unzip -q /tmp/cmdline-tools.zip -d /tmp/clt
+          rm -rf "$SDK/cmdline-tools/latest"
+          mv /tmp/clt/cmdline-tools "$SDK/cmdline-tools/latest"
+          echo "$SDK/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
+          yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null 2>&1 || true
 
       # compileSdk 37 的平台包在新版 SDK 里叫 platforms;android-37.0，
       # 且旧版 cmdline-tools 读不了 SDK XML v4，因此这里直接取官方 zip，最稳。
