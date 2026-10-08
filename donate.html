@@ -13,6 +13,8 @@
       --accent: #2f6df0;
       --accent-soft: #eef3ff;
       --line: #e7e7e4;
+      --wechat: #07c160;
+      --wechat-soft: #e8f8ef;
     }
     * { box-sizing: border-box; }
     body {
@@ -67,20 +69,61 @@
     }
     p { margin: 0 0 12px; }
     p:last-child { margin-bottom: 0; }
+    code {
+      background: #f2f2f0;
+      border-radius: 4px;
+      padding: 1px 6px;
+      font-size: 0.92em;
+    }
     .donate {
       text-align: center;
     }
     .qr {
-      width: 220px;
-      height: 220px;
-      margin: 8px auto 14px;
+      width: 232px;
+      height: auto;
+      margin: 10px auto 14px;
       border-radius: 14px;
       display: block;
+      background: #fff;
+      border: 1px solid var(--line);
+      padding: 8px;
     }
     .donate .tip {
       color: var(--muted);
       font-size: 13px;
     }
+    .badge {
+      display: inline-block;
+      background: var(--wechat-soft);
+      color: var(--wechat);
+      font-size: 13px;
+      font-weight: 700;
+      border-radius: 999px;
+      padding: 4px 14px;
+      margin-bottom: 6px;
+    }
+    .howto {
+      text-align: left;
+      color: var(--muted);
+      font-size: 13px;
+      background: #fafaf8;
+      border: 1px dashed var(--line);
+      border-radius: 12px;
+      padding: 12px 16px;
+      margin-top: 14px;
+    }
+    .howto ol { margin: 6px 0 0; padding-left: 20px; }
+    .howto li { margin: 2px 0; }
+    .supporters { text-align: center; }
+    .supporters .empty {
+      color: var(--muted);
+      font-size: 14px;
+      border: 1px dashed var(--line);
+      border-radius: 12px;
+      padding: 18px 16px;
+      margin-top: 4px;
+    }
+    .supporters .empty strong { color: var(--ink); }
     .links {
       display: flex;
       flex-wrap: wrap;
@@ -116,22 +159,26 @@
 
     <section class="card">
       <h2>一封感谢信</h2>
-      <p>亲爱的闪记SJ 用户，你好！</p>
+      <p>亲爱的朋友，你好！</p>
       <p>
-        感谢你选择并使用「闪记SJ」。这是一款<strong>本地优先</strong>的 Markdown
-        笔记应用，它脱胎于开源项目 MoeMemos，并由我在业余时间持续打磨——从灵感卡片的
-        精简排版，到网页正文的一键抓取，再到长文详情页的流畅体验，每一个细节，都希望能
-        让你"把想法记下来"这件事，变得轻松一点点。
+        感谢你在茫茫应用之海中，选择了「闪记SJ」。
       </p>
       <p>
-        闪记SJ 坚持<strong>本地优先</strong>：你的所有笔记都以 <code>.md</code> 文件
-        形式保存在你自己选择的文件夹里，不依赖任何服务器，数据完全掌握在你自己手中。
-        它也完全<strong>免费、开源</strong>（基于 GPL-3.0），没有任何内购或广告。
+        这是一款<strong>本地优先</strong>的 Markdown 笔记应用，基于开源项目
+        MoeMemos 二次开发而来。你的每一篇笔记都以 <code>.md</code> 纯文本的形式，
+        安安静静地躺在你自己选择的文件夹里——没有账号，没有服务器，没有广告，
+        也没有任何内购。数据永远只属于你，换手机、换电脑，拷走文件夹就是全部。
       </p>
       <p>
-        如果你觉得它好用，愿意请我喝杯咖啡、支持我继续把它做得更好，欢迎下方扫码打赏。
-        你的每一份心意，都是我坚持下去的动力。当然，不打算打赏也完全没关系——你能用得
-        顺手，就是对我最大的鼓励。
+        它的每一处打磨，都来自我的业余时间：修复一个诡异的 bug、适配一次新的系统版本、
+        回复每一条用户反馈……这些事不赚钱，但每当有人说"终于找到顺手的笔记应用了"，
+        就觉得值得。
+      </p>
+      <p>
+        闪记SJ 会一直<strong>免费</strong>下去。如果你愿意请我喝杯咖啡、或者请我喝一杯
+        快乐水，就是对我最直接、最温暖的鼓励；当然，打赏<strong>完全自愿、金额随意</strong>，
+        不打赏也丝毫不影响你使用任何功能——给我提个 Issue、点个 Star、推荐给身边的朋友，
+        一样是莫大的支持。
       </p>
       <p>再次感谢你的陪伴与支持 <span class="heart">❤</span></p>
       <p style="color: var(--muted); font-size: 14px;">—— zjwing2</p>
@@ -139,12 +186,29 @@
 
     <section class="card donate">
       <h2>请我喝杯咖啡</h2>
-      <img class="qr" src="donate-qr.svg" alt="打赏二维码" />
-      <p class="tip">请使用<strong>微信</strong>或<strong>支付宝</strong>扫一扫上方二维码进行打赏</p>
-      <div class="links">
+      <span class="badge">微信收款码</span>
+      <img class="qr" src="donate-qr.png" alt="微信打赏二维码" />
+      <p class="tip">金额随意，心意最重要 <span class="heart">❤</span></p>
+      <div class="howto">
+        <strong>扫码方式</strong>
+        <ol>
+          <li>手机：长按识别上方二维码，或截图后打开微信「扫一扫」→ 相册选择；</li>
+          <li>电脑：用微信「扫一扫」直接扫描屏幕上的二维码。</li>
+        </ol>
+      </div>
+      <div class="links" style="margin-top: 16px;">
         <a href="https://github.com/zjwing2/ShanJiSJ" target="_blank" rel="noopener">GitHub 主页</a>
         <a href="https://github.com/zjwing2/ShanJiSJ/issues" target="_blank" rel="noopener">反馈 / 建议</a>
         <a href="https://github.com/zjwing2/ShanJiSJ/releases" target="_blank" rel="noopener">下载最新版</a>
+      </div>
+    </section>
+
+    <section class="card supporters">
+      <h2>感谢名单</h2>
+      <div class="empty">
+        虚位以待——<strong>第一位支持者的名字，可能就是你。</strong><br />
+        打赏后欢迎到 <a href="https://github.com/zjwing2/ShanJiSJ/issues" target="_blank" rel="noopener">Issues</a>
+        告诉我你的昵称，我会把你写在这里。
       </div>
     </section>
 
