@@ -17,7 +17,7 @@
     <string name="memo">靈感</string>
     <string name="tag">標籤</string>
     <string name="fill_login_form">請填寫所有欄位</string>
-    <string name="acknowledgements">致謝</string>
+    <string name="acknowledgements">致謝打賞</string>
     <string name="privacy_policy">隱私政策</string>
     <string name="website">官網</string>
     <string name="about">關於 Moe Memos</string>
@@ -106,6 +106,8 @@
     <string name="loading">載入中…</string>
     <string name="error_unknown">未知錯誤</string>
     <string name="no_memos">找不到 MEMO</string>
+    <string name="search_no_result">找不到包含“%1$s”的筆記</string>
+    <string name="matching_tags">標籤</string>
     <string name="memo_not_found">找不到 MEMO</string>
     <!-- App lock strings -->
     <string name="security">安全</string>

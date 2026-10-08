@@ -18,7 +18,7 @@
     <string name="tag">标签</string>
     <string name="day">天</string>
     <string name="fill_login_form">请填写所有字段</string>
-    <string name="acknowledgements">致谢</string>
+    <string name="acknowledgements">致谢打赏</string>
     <string name="privacy_policy">隐私政策</string>
     <string name="website">官网</string>
     <string name="about">关于闪记SJ</string>
@@ -27,6 +27,14 @@
     <string name="moe_memos" translatable="false">闪记SJ</string>
     <string name="account_selected">已选择</string>
     <string name="report_an_issue">反馈 Bug</string>
+    <string name="data_management">数据管理</string>
+    <string name="empty_trash">清空回收站</string>
+    <string name="empty_trash_summary">永久删除回收站中的笔记与附件，不可恢复</string>
+    <string name="empty_trash_confirm_title">清空回收站？</string>
+    <string name="empty_trash_confirm_message">此操作会永久删除回收站里的全部笔记和附件，且无法恢复。确定要继续吗？</string>
+    <string name="empty_trash_done">回收站已清空</string>
+    <string name="empty_trash_empty">回收站本来就是空的</string>
+    <string name="folder_not_bound">尚未绑定笔记文件夹</string>
     <string name="unpin">取消置顶</string>
     <string name="sign_out">退出登录</string>
     <string name="address">地址</string>
@@ -146,6 +154,8 @@
     <string name="loading">加载中…</string>
     <string name="error_unknown">未知错误</string>
     <string name="no_memos">未找到 MEMO</string>
+    <string name="search_no_result">未找到包含“%1$s”的笔记</string>
+    <string name="matching_tags">标签</string>
     <string name="memo_not_found">未找到 MEMO</string>
     <string name="filter_by_tag">按标签筛选</string>
     <string name="pinned_only">仅显示置顶笔记</string>
