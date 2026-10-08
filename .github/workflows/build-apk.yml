@@ -79,7 +79,17 @@ jobs:
         run: ./gradlew --version
 
       - name: Unit tests (codec round-trip)
-        run: ./gradlew :app:testDebugUnitTest --stacktrace
+        run: |
+          set +e
+          ./gradlew :app:testDebugUnitTest --stacktrace > /tmp/gradle.log 2>&1
+          code=$?
+          tail -30 /tmp/gradle.log
+          if [ "$code" -ne 0 ]; then
+            # 把失败摘要以 annotation 形式暴露出来，便于定位
+            msg=$(tail -20 /tmp/gradle.log | awk '{printf "%s%%0A", $0}')
+            echo "::error title=GradleFailure::${msg}"
+            exit "$code"
+          fi
 
       - name: Build debug APK
         run: ./gradlew :app:assembleDebug
