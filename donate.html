@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>致谢与打赏 · 闪记SJ</title>
+  <style>
+    :root {
+      --bg: #f7f7f5;
+      --card: #ffffff;
+      --ink: #1f2328;
+      --muted: #6b7280;
+      --accent: #2f6df0;
+      --accent-soft: #eef3ff;
+      --line: #e7e7e4;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+        "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+      line-height: 1.75;
+      -webkit-font-smoothing: antialiased;
+    }
+    .wrap {
+      max-width: 680px;
+      margin: 0 auto;
+      padding: 28px 20px 56px;
+    }
+    header {
+      text-align: center;
+      padding: 18px 0 10px;
+    }
+    header .logo {
+      font-size: 30px;
+      font-weight: 800;
+      letter-spacing: 1px;
+    }
+    header .sub {
+      color: var(--muted);
+      font-size: 14px;
+      margin-top: 6px;
+    }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 22px 22px 24px;
+      margin: 18px 0;
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+    }
+    h2 {
+      font-size: 18px;
+      margin: 0 0 14px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    h2::before {
+      content: "";
+      width: 4px;
+      height: 18px;
+      background: var(--accent);
+      border-radius: 2px;
+    }
+    p { margin: 0 0 12px; }
+    p:last-child { margin-bottom: 0; }
+    .donate {
+      text-align: center;
+    }
+    .qr {
+      width: 220px;
+      height: 220px;
+      margin: 8px auto 14px;
+      border-radius: 14px;
+      display: block;
+    }
+    .donate .tip {
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .links {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      justify-content: center;
+      margin-top: 6px;
+    }
+    .links a {
+      text-decoration: none;
+      color: var(--accent);
+      background: var(--accent-soft);
+      padding: 9px 16px;
+      border-radius: 999px;
+      font-size: 14px;
+      font-weight: 600;
+    }
+    .links a:hover { filter: brightness(0.97); }
+    footer {
+      text-align: center;
+      color: var(--muted);
+      font-size: 12px;
+      margin-top: 28px;
+    }
+    .heart { color: #e5484d; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div class="logo">闪记SJ</div>
+      <div class="sub">本地优先的 Markdown 笔记 · 免费 · 开源</div>
+    </header>
+
+    <section class="card">
+      <h2>一封感谢信</h2>
+      <p>亲爱的闪记SJ 用户，你好！</p>
+      <p>
+        感谢你选择并使用「闪记SJ」。这是一款<strong>本地优先</strong>的 Markdown
+        笔记应用，它脱胎于开源项目 MoeMemos，并由我在业余时间持续打磨——从灵感卡片的
+        精简排版，到网页正文的一键抓取，再到长文详情页的流畅体验，每一个细节，都希望能
+        让你"把想法记下来"这件事，变得轻松一点点。
+      </p>
+      <p>
+        闪记SJ 坚持<strong>本地优先</strong>：你的所有笔记都以 <code>.md</code> 文件
+        形式保存在你自己选择的文件夹里，不依赖任何服务器，数据完全掌握在你自己手中。
+        它也完全<strong>免费、开源</strong>（基于 GPL-3.0），没有任何内购或广告。
+      </p>
+      <p>
+        如果你觉得它好用，愿意请我喝杯咖啡、支持我继续把它做得更好，欢迎下方扫码打赏。
+        你的每一份心意，都是我坚持下去的动力。当然，不打算打赏也完全没关系——你能用得
+        顺手，就是对我最大的鼓励。
+      </p>
+      <p>再次感谢你的陪伴与支持 <span class="heart">❤</span></p>
+      <p style="color: var(--muted); font-size: 14px;">—— zjwing2</p>
+    </section>
+
+    <section class="card donate">
+      <h2>请我喝杯咖啡</h2>
+      <img class="qr" src="donate-qr.svg" alt="打赏二维码" />
+      <p class="tip">请使用<strong>微信</strong>或<strong>支付宝</strong>扫一扫上方二维码进行打赏</p>
+      <div class="links">
+        <a href="https://github.com/zjwing2/ShanJiSJ" target="_blank" rel="noopener">GitHub 主页</a>
+        <a href="https://github.com/zjwing2/ShanJiSJ/issues" target="_blank" rel="noopener">反馈 / 建议</a>
+        <a href="https://github.com/zjwing2/ShanJiSJ/releases" target="_blank" rel="noopener">下载最新版</a>
+      </div>
+    </section>
+
+    <footer>
+      © <span id="year"></span> zjwing2 · 闪记SJ 基于 GPL-3.0 开源协议发布
+    </footer>
+  </div>
+  <script>document.getElementById('year').textContent = new Date().getFullYear();</script>
+</body>
+</html>

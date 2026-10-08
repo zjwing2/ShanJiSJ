@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="240" height="240" viewBox="0 0 240 240" role="img" aria-label="打赏二维码占位">
+  <rect x="6" y="6" width="228" height="228" rx="14" fill="#ffffff" stroke="#2f6df0" stroke-width="3" stroke-dasharray="10 8"/>
+  <g fill="none" stroke="#2f6df0" stroke-width="3">
+    <!-- 三个定位角，模拟二维码外观 -->
+    <rect x="28" y="28" width="48" height="48" rx="6"/>
+    <rect x="164" y="28" width="48" height="48" rx="6"/>
+    <rect x="28" y="164" width="48" height="48" rx="6"/>
+  </g>
+  <g fill="#2f6df0">
+    <rect x="40" y="40" width="24" height="24" rx="3"/>
+    <rect x="176" y="40" width="24" height="24" rx="3"/>
+    <rect x="40" y="176" width="24" height="24" rx="3"/>
+  </g>
+  <text x="120" y="128" text-anchor="middle" font-family="-apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif" font-size="16" font-weight="700" fill="#1f2328">打赏二维码</text>
+  <text x="120" y="152" text-anchor="middle" font-family="-apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif" font-size="12" fill="#6b7280">请替换为你的微信 / 支付宝收款码</text>
+</svg>
