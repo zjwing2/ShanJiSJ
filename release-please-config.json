@@ -1,7 +1,7 @@
 {
   "release-type": "simple",
   "include-v-in-tag": true,
-  "bootstrap-sha": "4a8c77882e57c346d42b4f9c6f1a1f3b3b1fc8b9",
+  "bootstrap-sha": "5667c135dc9caa891aec441b091d9228e1b5b8a7",
   "changelog-sections": [
     { "type": "feat", "section": "新增功能" },
     { "type": "fix", "section": "问题修复" },
