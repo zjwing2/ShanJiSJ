@@ -41,19 +41,38 @@ jobs:
 
       # compileSdk 37 的平台包在新版 SDK 里叫 platforms;android-37.0，
       # 且旧版 cmdline-tools 读不了 SDK XML v4，因此这里直接取官方 zip，最稳。
-      - name: Install platform 37 and build-tools 37
+      - name: Install platform 37
         run: |
           set -eux
           SDK="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+          mkdir -p "$SDK/platforms"
           curl -fsSL -o /tmp/platform37.zip https://dl.google.com/android/repository/platform-37.0_r02.zip
-          unzip -q /tmp/platform37.zip -d "$SDK/platforms"
+          unzip -q /tmp/platform37.zip -d /tmp/p37
+          rm -rf "$SDK/platforms/android-37.0" "$SDK/platforms/android-37"
+          mv /tmp/p37/android-37.0 "$SDK/platforms/android-37.0"
           cp -R "$SDK/platforms/android-37.0" "$SDK/platforms/android-37"
+
+      - name: Install build-tools 37
+        run: |
+          set -eux
+          SDK="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+          mkdir -p "$SDK/build-tools"
           curl -fsSL -o /tmp/bt37.zip https://dl.google.com/android/repository/build-tools_r37_linux.zip
           unzip -q /tmp/bt37.zip -d /tmp/bt37
+          rm -rf "$SDK/build-tools/37.0.0"
           mv /tmp/bt37/android-37.0 "$SDK/build-tools/37.0.0"
           chmod +x "$SDK/build-tools/37.0.0"/* || true
-          sdkmanager "ndk;${MOEMEMOS_NDK_VERSION}" > /dev/null
           echo "sdk.dir=$SDK" > local.properties
+
+      # NDK 只用于给 AndroidX 的预编译 .so 做 strip，项目本身没有原生源码。
+      # 缺失时 AGP 只会告警并原样打包，不影响构建结果，所以这里允许失败，
+      # 避免整个 CI 被 NDK 的下载/许可问题拖挂。
+      - name: Install NDK (optional)
+        continue-on-error: true
+        run: |
+          set -eux
+          yes | sdkmanager --licenses > /dev/null 2>&1 || true
+          sdkmanager --install "ndk;${MOEMEMOS_NDK_VERSION}"
 
       - name: Unit tests (codec round-trip)
         run: ./gradlew :app:testDebugUnitTest
