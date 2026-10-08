@@ -74,8 +74,12 @@ jobs:
           yes | sdkmanager --licenses > /dev/null 2>&1 || true
           sdkmanager --install "ndk;${MOEMEMOS_NDK_VERSION}"
 
+      # 单独一步先验证 wrapper 能否正常启动，便于在 CI 上快速定位故障环节
+      - name: Gradle version check
+        run: ./gradlew --version
+
       - name: Unit tests (codec round-trip)
-        run: ./gradlew :app:testDebugUnitTest
+        run: ./gradlew :app:testDebugUnitTest --stacktrace
 
       - name: Build debug APK
         run: ./gradlew :app:assembleDebug
