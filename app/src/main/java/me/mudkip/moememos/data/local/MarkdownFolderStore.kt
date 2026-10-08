@@ -235,6 +235,31 @@ class MarkdownFolderStore(private val context: Context) {
         return runCatching { source.delete() }.getOrDefault(false)
     }
 
+    /**
+     * 清空回收站：删除 `trash/` 下的全部内容（含月份子目录与 `trash/attachments/`）。
+     * 与删除笔记相反，这里做**硬删**——回收站本身就是"已删除"的兜底，用户主动点
+     * "清空"即表示放弃这些文件。返回成功删除的条目数。
+     */
+    fun emptyTrash(): Int {
+        val trash = trashRoot(create = false) ?: return 0
+        if (!trash.isDirectory) return 0
+        val children = runCatching { trash.listFiles() }.getOrNull() ?: return 0
+        var count = 0
+        for (child in children) {
+            if (deleteRecursive(child)) count++
+        }
+        return count
+    }
+
+    /** SAF 没有递归删除，只能自顶向下逐层删。 */
+    private fun deleteRecursive(file: DocumentFile): Boolean {
+        if (file.isDirectory) {
+            val children = runCatching { file.listFiles() }.getOrNull() ?: emptyArray()
+            for (child in children) deleteRecursive(child)
+        }
+        return runCatching { file.delete() }.getOrDefault(false)
+    }
+
     private fun copyInto(source: DocumentFile, target: DocumentFile) {
         val children = runCatching { source.listFiles() }.getOrNull() ?: return
         for (child in children) {

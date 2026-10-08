@@ -8,6 +8,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.outlined.BugReport
 import androidx.compose.material.icons.outlined.Check
+import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.Lock
@@ -33,6 +34,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import android.widget.Toast
+import kotlinx.coroutines.withContext
+import me.mudkip.moememos.data.local.MarkdownFolderStore
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
@@ -81,6 +85,7 @@ fun SettingsPage(
             MtlsManager.hasSelectedCertificate(context)
         )
     }
+    var showEmptyTrashDialog by remember { mutableStateOf(false) }
 
     fun chooseClientCertificate() {
         val activity = context as? Activity
@@ -333,6 +338,35 @@ fun SettingsPage(
 
             item {
                 Text(
+                    R.string.data_management.string,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(24.dp, 10.dp),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.outline
+                )
+            }
+
+            item {
+                SettingItem(
+                    icon = Icons.Outlined.Delete,
+                    text = R.string.empty_trash.string,
+                    subtitle = R.string.empty_trash_summary.string
+                ) {
+                    if (MarkdownFolderStore(context).isBound()) {
+                        showEmptyTrashDialog = true
+                    } else {
+                        Toast.makeText(
+                            context,
+                            R.string.folder_not_bound.string,
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    }
+                }
+            }
+
+            item {
+                Text(
                     R.string.about.string,
                     modifier = Modifier
                         .fillMaxWidth()
@@ -344,7 +378,7 @@ fun SettingsPage(
 
             item {
                 SettingItem(icon = Icons.Outlined.Web, text = R.string.website.string) {
-                    uriHandler.openUri("https://memos.moe")
+                    uriHandler.openUri("https://github.com/zjwing2")
                 }
             }
 
@@ -356,7 +390,7 @@ fun SettingsPage(
 
             item {
                 SettingItem(icon = Icons.Outlined.Source, text = R.string.acknowledgements.string) {
-                    uriHandler.openUri("https://memos.moe/android-acknowledgements")
+                    uriHandler.openUri("https://zjwing2.github.io/ShanJiSJ/donate.html")
                 }
             }
 
@@ -365,7 +399,7 @@ fun SettingsPage(
                     icon = Icons.Outlined.BugReport,
                     text = R.string.report_an_issue.string
                 ) {
-                    uriHandler.openUri("https://github.com/mudkipme/MoeMemosAndroid/issues")
+                    uriHandler.openUri("https://github.com/zjwing2/ShanJiSJ/issues")
                 }
             }
         }
@@ -397,6 +431,40 @@ fun SettingsPage(
                     onClick = {
                         showRemoveCertificateDialog = false
                     }
+                ) {
+                    Text(R.string.cancel.string)
+                }
+            }
+        )
+    }
+    if (showEmptyTrashDialog) {
+        AlertDialog(
+            onDismissRequest = { showEmptyTrashDialog = false },
+            title = { Text(R.string.empty_trash_confirm_title.string) },
+            text = { Text(R.string.empty_trash_confirm_message.string) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showEmptyTrashDialog = false
+                        scope.launch(Dispatchers.IO) {
+                            val n = MarkdownFolderStore(context).emptyTrash()
+                            withContext(Dispatchers.Main) {
+                                val msg = if (n > 0) {
+                                    R.string.empty_trash_done.string + "（${n} 项）"
+                                } else {
+                                    R.string.empty_trash_empty.string
+                                }
+                                Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    }
+                ) {
+                    Text(R.string.confirm.string)
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { showEmptyTrashDialog = false }
                 ) {
                     Text(R.string.cancel.string)
                 }
