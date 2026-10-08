@@ -10,6 +10,10 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    # 把 APK 附加到 Release 需要写权限，GITHUB_TOKEN 默认为只读，
+    # 缺这一项会报 "Resource not accessible by integration"。
+    permissions:
+      contents: write
     env:
       # 本 fork 需要 NDK 给 AndroidX 的预编译 .so 做 strip（项目本身没有原生源码）
       MOEMEMOS_NDK_VERSION: '28.2.13676358'
