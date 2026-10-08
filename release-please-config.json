@@ -1,0 +1,28 @@
+{
+  "release-type": "simple",
+  "include-v-in-tag": true,
+  "bootstrap-sha": "4a8c77882e57c346d42b4f9c6f1a1f3b3b1fc8b9",
+  "changelog-sections": [
+    { "type": "feat", "section": "新增功能" },
+    { "type": "fix", "section": "问题修复" },
+    { "type": "perf", "section": "性能优化" },
+    { "type": "revert", "section": "回滚" },
+    { "type": "refactor", "section": "代码重构", "hidden": true },
+    { "type": "docs", "section": "文档", "hidden": true },
+    { "type": "chore", "section": "杂项", "hidden": true },
+    { "type": "ci", "section": "持续集成", "hidden": true },
+    { "type": "test", "section": "测试", "hidden": true }
+  ],
+  "packages": {
+    ".": {
+      "package-name": "ShanJiSJ",
+      "changelog-path": "CHANGELOG.md",
+      "extra-files": [
+        {
+          "type": "generic",
+          "path": "app/build.gradle"
+        }
+      ]
+    }
+  }
+}

@@ -34,8 +34,17 @@ android {
         applicationId = "me.mudkip.moememos"
         minSdk = 26
         targetSdk = 37
-        versionCode = 64
-        versionName = "2.0.20"
+        // 版本号只在这一行维护。release-please 会依据约定式提交自动改写它
+        // （识别靠行尾的 x-release-please-version 注解，配置见 release-please-config.json）。
+        def sjVersionName = "2.1.0" // x-release-please-version
+        versionName = sjVersionName
+        // versionCode 由 versionName 推算，保证版本号一变就递增，不必手工同步：
+        // major * 10000 + minor * 100 + patch，例如 2.1.0 -> 20100、3.0.0 -> 30000。
+        // 预发布后缀（-beta.1 等）不参与计算，与对应正式版共用同一个 versionCode。
+        def sjVersionParts = sjVersionName.tokenize('.-')
+        versionCode = sjVersionParts[0].toInteger() * 10000 +
+                sjVersionParts[1].toInteger() * 100 +
+                sjVersionParts[2].toInteger()
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
