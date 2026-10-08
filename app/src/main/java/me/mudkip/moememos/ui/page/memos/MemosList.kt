@@ -1,16 +1,21 @@
 package me.mudkip.moememos.ui.page.memos
 
 import android.net.Uri
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.padding
 import androidx.compose.ui.res.stringResource
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -40,13 +45,15 @@ import me.mudkip.moememos.ui.component.MemosCard
 import me.mudkip.moememos.ui.page.common.LocalRootNavController
 import me.mudkip.moememos.ui.util.edgeToEdgeContentPadding
 import me.mudkip.moememos.ui.page.common.RouteName
+import me.mudkip.moememos.util.extractCustomTags
 import me.mudkip.moememos.util.hasCustomTag
+import me.mudkip.moememos.util.matchesQuery
 import me.mudkip.moememos.viewmodel.LocalMemos
 import me.mudkip.moememos.viewmodel.LocalUserState
 import me.mudkip.moememos.viewmodel.ManualSyncResult
 import timber.log.Timber
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun MemosList(
     contentPadding: PaddingValues,
@@ -85,13 +92,30 @@ fun MemosList(
 
         searchString?.let { searchString ->
             if (searchString.isNotEmpty()) {
-                fullList = fullList.filter { memo ->
-                    memo.content.contains(searchString, true)
-                }
+                fullList = fullList.filter { it.matchesQuery(searchString) }
             }
         }
 
         fullList
+    }
+    // 搜索时展示与关键词匹配的标签，点击可跳转到标签页
+    val allTags = remember(viewModel.memos.toList()) {
+        viewModel.memos.asSequence()
+            .flatMap { extractCustomTags(it.content).asSequence() }
+            .toSortedSet()
+    }
+    val matchingTags = remember(allTags, searchString) {
+        if (searchString.isNullOrEmpty()) {
+            emptyList()
+        } else {
+            allTags.filter { it.contains(searchString, ignoreCase = true) }.take(20)
+        }
+    }
+    // 搜索词变化时回到列表顶部，避免新插入的标签行被滚动锚点顶出视口
+    LaunchedEffect(searchString) {
+        if (searchString != null) {
+            lazyListState.scrollToItem(0)
+        }
     }
     var listTopId: String? by rememberSaveable {
         mutableStateOf(null)
@@ -135,9 +159,35 @@ fun MemosList(
             state = lazyListState,
             contentPadding = listContentPadding
         ) {
+            if (matchingTags.isNotEmpty()) {
+                item(key = "matching_tags") {
+                    FlowRow(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 15.dp, vertical = 4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            stringResource(R.string.matching_tags),
+                            modifier = Modifier.padding(top = 8.dp)
+                        )
+                        matchingTags.forEach { tag ->
+                            AssistChip(
+                                onClick = { onTagClick?.invoke(tag) },
+                                label = { Text("#$tag") }
+                            )
+                        }
+                    }
+                }
+            }
             if (filteredMemos.isEmpty()) {
                 item(key = "empty") {
-                    Text(stringResource(R.string.no_memos), modifier = Modifier.padding(24.dp))
+                    val emptyText = if (!searchString.isNullOrEmpty()) {
+                        stringResource(R.string.search_no_result, searchString)
+                    } else {
+                        stringResource(R.string.no_memos)
+                    }
+                    Text(emptyText, modifier = Modifier.padding(24.dp))
                 }
             }
             items(filteredMemos, key = { it.identifier }) { memo ->
